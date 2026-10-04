@@ -1,0 +1,82 @@
+import { useEffect, useState } from "react";
+import { api } from "./api.js";
+import AskTab from "./AskTab.jsx";
+import ResultsTab from "./ResultsTab.jsx";
+
+const TABS = [
+  { id: "ask", label: "Ask" },
+  { id: "results", label: "Results" },
+];
+
+export default function App() {
+  const [tab, setTab] = useState(() => (location.hash === "#results" ? "results" : "ask"));
+  const [config, setConfig] = useState(null);
+  const [configError, setConfigError] = useState(null);
+
+  useEffect(() => {
+    api("/api/config").then(setConfig).catch((e) => setConfigError(e.message));
+  }, []);
+
+  const select = (id) => {
+    setTab(id);
+    history.replaceState(null, "", `#${id}`);
+  };
+
+  const onKey = (e) => {
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      const i = TABS.findIndex((t) => t.id === tab);
+      const next = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+      select(next.id);
+      document.getElementById(`tab-${next.id}`)?.focus();
+    }
+  };
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <span className="logo" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="28" height="28">
+              <circle cx="8" cy="24" r="5" fill="var(--series-1)" />
+              <circle cx="24" cy="8" r="5" fill="var(--series-2)" />
+              <path d="M8 24 C 8 12, 24 20, 24 8" stroke="var(--text-muted)" strokeWidth="2.5" fill="none" />
+            </svg>
+          </span>
+          <div>
+            <h1>Route or Roam</h1>
+            <p className="subtitle">Fixed workflow vs ReAct agent: same question, same tools, same budget.</p>
+          </div>
+        </div>
+        <ConfigBadge config={config} error={configError} />
+      </header>
+
+      <nav className="tabs" role="tablist" aria-label="Views" onKeyDown={onKey}>
+        {TABS.map((t) => (
+          <button key={t.id} id={`tab-${t.id}`} role="tab" aria-selected={tab === t.id}
+            aria-controls={`panel-${t.id}`} tabIndex={tab === t.id ? 0 : -1}
+            className={`tab ${tab === t.id ? "active" : ""}`} onClick={() => select(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      <main id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`}>
+        {tab === "ask" ? <AskTab config={config} /> : <ResultsTab />}
+      </main>
+    </div>
+  );
+}
+
+function ConfigBadge({ config, error }) {
+  if (error) return <div className="config-badge bad" role="status">API unreachable: {error}</div>;
+  if (!config) return <div className="config-badge" role="status">Connecting…</div>;
+  return (
+    <div className="config-badge" title={config.tools.map((t) => `${t.name}: ${t.description}`).join("\n")}>
+      <span className={`dot ${config.key_available ? "ok" : "bad"}`} aria-hidden="true" />
+      <span><strong>{config.model}</strong> via {config.provider}</span>
+      <span className="sep" aria-hidden="true">·</span>
+      <span>budget {config.budget.max_steps} steps / {config.budget.max_tokens.toLocaleString("en-US")} tokens</span>
+      {!config.key_available && <span className="warn-text">no API key configured</span>}
+    </div>
+  );
+}
