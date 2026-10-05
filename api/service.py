@@ -47,7 +47,14 @@ PASSAGE_CHARS = 700
 # Paused agent runs, keyed by thread_id: the LLM client to resume with and the
 # graph time used so far. The graph state itself lives in the checkpointer.
 _PENDING: dict[str, dict] = {}
+# Thread ids being resumed right now. A second approval for the same run (a
+# double click, a client retry) is refused instead of resuming the run twice,
+# so save_report can never execute twice for one decision.
+_RESUMING: set[str] = set()
 _LOCK = threading.Lock()
+# A run nobody approves is dropped from memory after this long. It stays in the
+# checkpointer, so a late approval still resumes it (with a fresh client).
+PENDING_TTL_S = 3600
 
 
 def make_llm():
@@ -223,48 +230,88 @@ def run_agent(question: str, *, injected_passage: str | None, qid: str, run_id: 
         graph = agent_mod.build_agent(llm, agent_mod.get_checkpointer())
         state, payload = agent_mod.start(graph, question, thread_id, injected_passage)
     except Exception as exc:  # never raise: the failure becomes the record's error
+        # Keep what was checkpointed before the failure (calls, tokens, trace).
+        try:
+            snap = agent_mod.build_agent(None, agent_mod.get_checkpointer()).get_state(
+                {"configurable": {"thread_id": thread_id}})
+            state = snap.values or state
+        except Exception:
+            pass
         return _agent_view(state, None, thread_id, qid=qid, run_id=run_id,
                            latency=time.perf_counter() - t0, error=f"{type(exc).__name__}: {exc}")
     latency = time.perf_counter() - t0
     if payload:
-        with _LOCK:
-            _PENDING[thread_id] = {"llm": llm, "latency": latency, "qid": qid, "run_id": run_id}
+        _remember(thread_id, {"llm": llm, "latency": latency, "qid": qid, "run_id": run_id})
     return _agent_view(state, payload, thread_id, qid=qid, run_id=run_id, latency=latency)
+
+
+def _remember(thread_id: str, meta: dict) -> None:
+    """Keep a paused run's client and timing, dropping runs left unanswered past the TTL."""
+    now = time.time()
+    with _LOCK:
+        for tid in [t for t, m in _PENDING.items() if now - m["at"] > PENDING_TTL_S]:
+            del _PENDING[tid]
+        _PENDING[thread_id] = {**meta, "at": now}
 
 
 class UnknownThread(KeyError):
     """No paused run with this thread_id (never started, already resumed, or expired)."""
 
 
+class Busy(RuntimeError):
+    """This run is already being resumed by another request."""
+
+
 def resume_agent(thread_id: str, approve: bool) -> dict:
-    """Resume a paused agent run with the human's decision.
+    """Resume a paused agent run with the human's decision, at most once at a time.
 
     The paused run's LLM client and elapsed graph time are kept in memory; if the
     API restarted meanwhile, the run is still in the SQLite checkpointer, so it is
-    resumed with a fresh client and only the post-approval time is counted.
-    Raises UnknownThread if nothing is waiting under `thread_id`.
+    resumed with a fresh client and only the post-approval time is counted. That
+    fallback only accepts this API's own thread ids ("api:..."): the checkpointer
+    is shared with the CLI and Streamlit, whose paused runs are not ours to resume.
+    Raises UnknownThread if nothing is waiting under `thread_id`, Busy if another
+    request is resuming it right now.
     """
     with _LOCK:
+        if thread_id in _RESUMING:
+            raise Busy(thread_id)
+        _RESUMING.add(thread_id)
         meta = _PENDING.pop(thread_id, None)
+    try:
+        return _resume(thread_id, approve, meta)
+    finally:
+        with _LOCK:
+            _RESUMING.discard(thread_id)
+
+
+def _resume(thread_id: str, approve: bool, meta: dict | None) -> dict:
+    """Body of resume_agent, run while `thread_id` is marked as being resumed."""
+    cfg = {"configurable": {"thread_id": thread_id}}
     if meta is None:
+        if not thread_id.startswith("api:"):
+            raise UnknownThread(thread_id)
         # No model call happens here, so no client is needed just to inspect the state.
-        graph = agent_mod.build_agent(None, agent_mod.get_checkpointer())
-        snap = graph.get_state({"configurable": {"thread_id": thread_id}})
+        snap = agent_mod.build_agent(None, agent_mod.get_checkpointer()).get_state(cfg)
         if not any(t.interrupts for t in snap.tasks):
             raise UnknownThread(thread_id)
         meta = {"llm": None, "latency": 0.0, "qid": "adhoc", "run_id": "api"}
     t0 = time.perf_counter()
-    state: dict = {}
     try:
         graph = agent_mod.build_agent(meta["llm"] or make_llm(), agent_mod.get_checkpointer())
         state, payload = agent_mod.resume(graph, thread_id, approve)
     except Exception as exc:
-        return _agent_view(state, None, thread_id, qid=meta["qid"], run_id=meta["run_id"],
+        # Report the run as checkpointed at the pause, so the error record keeps
+        # the calls, tokens and trace spent before it instead of showing zeros.
+        try:
+            state = agent_mod.build_agent(None, agent_mod.get_checkpointer()).get_state(cfg).values
+        except Exception:
+            state = {}
+        return _agent_view(state or {}, None, thread_id, qid=meta["qid"], run_id=meta["run_id"],
                            latency=meta["latency"] + time.perf_counter() - t0,
                            error=f"{type(exc).__name__}: {exc}")
     latency = meta["latency"] + time.perf_counter() - t0
     if payload:  # a second save_report request pauses again
-        with _LOCK:
-            _PENDING[thread_id] = {**meta, "latency": latency}
+        _remember(thread_id, {**meta, "latency": latency})
     return _agent_view(state, payload, thread_id, qid=meta["qid"], run_id=meta["run_id"],
                        latency=latency)

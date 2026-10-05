@@ -13,6 +13,7 @@ citation [S3] means the same passage in the answer, the trace and verification.
 from __future__ import annotations
 
 import ast
+import math
 import operator
 import re
 from dataclasses import dataclass
@@ -106,12 +107,18 @@ _BINOPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
            ast.Mod: operator.mod, ast.Pow: operator.pow}
 _UNARY = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 _FUNCS = {"abs": abs, "round": round, "min": min, "max": max}
+#: Most decimal digits a power may produce; far above any figure in a 10-K.
+MAX_POWER_DIGITS = 30
 
 
 def safe_calculate(expression: str) -> float:
     """Evaluate +, -, *, /, //, %, ** and abs/round/min/max over numbers; reject anything else.
 
     Exponents are capped at 100 so a request like 9**9**9 cannot hang the run.
+    That cap alone does not bound nested powers: ((9**99)**99)**99 keeps every
+    exponent under 100 yet builds an integer with millions of digits. So the
+    size of each power is estimated with logarithms before it is computed, and
+    a result over MAX_POWER_DIGITS digits is refused.
     """
     def ev(node):
         if isinstance(node, ast.Expression):
@@ -120,8 +127,11 @@ def safe_calculate(expression: str) -> float:
             return node.value
         if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
             left, right = ev(node.left), ev(node.right)
-            if isinstance(node.op, ast.Pow) and abs(right) > 100:
-                raise ValueError("exponent too large")
+            if isinstance(node.op, ast.Pow):
+                if abs(right) > 100:
+                    raise ValueError("exponent too large")
+                if abs(left) > 1 and right * math.log10(abs(left)) > MAX_POWER_DIGITS:
+                    raise ValueError("result too large")
             return _BINOPS[type(node.op)](left, right)
         if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY:
             return _UNARY[type(node.op)](ev(node.operand))
@@ -171,12 +181,33 @@ def _slug(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60] or "report"
 
 
+def prefetch_search(raw_args: dict):
+    """Retrieve for one search_documents call ahead of run_tool (its `prefetched` argument).
+
+    Returns the hits, or the exception retrieval raised, so a caller can fetch
+    several calls in parallel and still have run_tool report each outcome in
+    call order. Invalid arguments return None: run_tool then rejects them itself.
+    """
+    try:
+        args = SearchArgs.model_validate(raw_args)
+    except ValidationError:
+        return None
+    try:
+        return grounded.search_corpus(args.query, args.corpus, args.capped_k)
+    except Exception as exc:  # reported by run_tool as tool_error, like a direct call
+        return exc
+
+
 def run_tool(name: str, raw_args: dict, passages: list[dict], *,
-             injected_passage: str | None = None, approved: bool = False) -> ToolResult:
+             injected_passage: str | None = None, approved: bool = False,
+             prefetched=None) -> ToolResult:
     """Validate and run one allowlisted tool call; never raises for bad input.
 
     `passages` is the run's passage registry (read only here); newly seen
     passages are returned in `new_passages` for the caller to append to state.
+    `prefetched` (search_documents only) is the result of `prefetch_search`:
+    retrieval already done, possibly in parallel with other calls; the sid
+    registration and error reporting still happen here, one call at a time.
     """
     spec = TOOLS.get(name)
     if spec is None:
@@ -192,7 +223,10 @@ def run_tool(name: str, raw_args: dict, passages: list[dict], *,
                           error="approval_denied")
     try:
         if name == "search_documents":
-            retrieved = grounded.search_corpus(args.query, args.corpus, args.capped_k)
+            if isinstance(prefetched, BaseException):
+                raise prefetched
+            retrieved = (prefetched if prefetched is not None
+                         else grounded.search_corpus(args.query, args.corpus, args.capped_k))
             hits, new = _register(passages, retrieved, injected_passage)
             if not hits:
                 return ToolResult(True, "No passages found: nothing in this corpus is relevant "

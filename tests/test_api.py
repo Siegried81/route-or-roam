@@ -125,6 +125,73 @@ def test_approve_unknown_thread_is_404(client):
     assert client.post("/api/approve", json={"thread_id": "nope", "approve": True}).status_code == 404
 
 
+def test_approve_while_already_resuming_is_409(client, monkeypatch, tmp_path):
+    script_llm(monkeypatch, [tool_reply(SEARCH), tool_reply(SAVE), GOOD])
+    ag = client.post("/api/ask", json={"system": "agent", "question": "Save a report"}
+                     ).json()["results"]["agent"]
+    service._RESUMING.add(ag["thread_id"])  # another request is resuming this run right now
+    try:
+        busy = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True})
+    finally:
+        service._RESUMING.discard(ag["thread_id"])
+    assert busy.status_code == 409
+    assert not (tmp_path / "reports").exists()
+    # The refused duplicate did not consume the decision: the run is still resumable.
+    ok = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True})
+    assert ok.status_code == 200 and (tmp_path / "reports" / "apple-sales.md").exists()
+
+
+def test_approve_after_restart_resumes_from_checkpointer(client, monkeypatch):
+    script_llm(monkeypatch, [tool_reply(SEARCH), tool_reply(SAVE)], [GOOD])
+    ag = client.post("/api/ask", json={"system": "agent", "question": "Save a report"}
+                     ).json()["results"]["agent"]
+    service._PENDING.clear()  # what an API restart does to the in-memory side
+    done = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True}).json()
+    assert done["status"] == "done" and done["results"]["agent"]["record"]["answer"] == GOOD
+
+
+def test_approve_ignores_paused_runs_from_other_front_ends(client, monkeypatch):
+    script_llm(monkeypatch, [tool_reply(SEARCH), tool_reply(SAVE)])
+    ag = client.post("/api/ask", json={"system": "agent", "question": "Save a report"}
+                     ).json()["results"]["agent"]
+    service._PENDING.clear()
+    # Same checkpointer, but an id the API did not create (as the CLI or Streamlit would).
+    other = ag["thread_id"].replace("api:", "cli:", 1)
+    assert client.post("/api/approve", json={"thread_id": other, "approve": True}).status_code == 404
+
+
+def test_failed_resume_keeps_the_paused_state(client, monkeypatch):
+    script_llm(monkeypatch, [tool_reply(SEARCH), tool_reply(SAVE)])  # nothing left after the pause
+    ag = client.post("/api/ask", json={"system": "agent", "question": "Save a report"}
+                     ).json()["results"]["agent"]
+    rec = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True}
+                      ).json()["results"]["agent"]["record"]
+    assert rec["error"]
+    assert rec["llm_calls"] >= 2 and rec["tool_calls"]  # not reset to an empty run
+
+
+def test_pending_runs_expire_after_ttl(monkeypatch):
+    monkeypatch.setattr(service, "_PENDING", {"api:old": {"at": 0.0}})
+    service._remember("api:new", {"llm": None, "latency": 0.0, "qid": "q", "run_id": "api"})
+    assert set(service._PENDING) == {"api:new"}
+
+
+def test_config_key_available_through_grounded_rag_fallback(client, monkeypatch):
+    from rr.grounded import gr_config
+
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(settings, "GROQ_API_KEYS", [])
+    monkeypatch.setattr(gr_config, "GROQ_API_KEYS", ["gsk_from_grounded_rag"], raising=False)
+    assert client.get("/api/config").json()["key_available"] is True
+    monkeypatch.setattr(gr_config, "GROQ_API_KEYS", [], raising=False)
+    assert client.get("/api/config").json()["key_available"] is False
+
+
+def test_results_malformed_run_file_is_422(client, runs_dir):
+    (runs_dir / "bad.jsonl").write_text('{}\n{"qid": "sh01"}\n', encoding="utf-8")
+    assert client.get("/api/results", params={"run": "bad.jsonl"}).status_code == 422
+
+
 @pytest.mark.parametrize("payload", [
     {"system": "robot", "question": "q"},
     {"system": "agent", "question": ""},
@@ -191,7 +258,14 @@ def test_results_aggregation_tolerates_partial_last_line(client, runs_dir):
     assert wf["p50_latency"] == 2.0 and ag["p95_latency"] == 4.0
     assert wf["tokens"] == 1100
     assert ag["top_tags"][0] == {"tag": "loop_or_budget", "count": 1}
-    assert "workflow succeeds more often" in body["takeaway"] and "2.0x the LLM calls" in body["takeaway"]
+    # sh01 only the workflow passes, sh02 only the agent: 1 vs 1 discordant, p = 1.
+    assert body["paired"] == {"pairs": 2, "both": 0, "only_first": 1, "only_second": 1,
+                              "neither": 0, "p_value": 1.0}
+    assert "not significantly different" in body["takeaway"] and "McNemar" in body["takeaway"]
+    assert "2.0x the LLM calls" in body["takeaway"] and "n=2 each" in body["takeaway"]
+    assert wf["passed"] == 2 and wf["wilson"][0] < 2 / 3 < wf["wilson"][1]
+    assert wf["overall"]["spread"] is None  # one repeat: no spread, not "± 0"
+    assert wf["n_by_type"] == {"single_hop": 3} and "McNemar" in body["paired_sentence"]
 
 
 def test_takeaway_is_neutral_within_spread():
@@ -199,8 +273,19 @@ def test_takeaway_is_neutral_within_spread():
                 "llm_calls": c, "p50_latency": 1.0} for s, m, c in [("workflow", 0.6, 3), ("agent", 0.65, 6)]}
     from api.results import takeaway
 
-    assert "not a meaningful difference" in takeaway(sys_) and "2.0x the LLM calls" in takeaway(sys_)
+    assert "not significantly different" in takeaway(sys_) and "2.0x the LLM calls" in takeaway(sys_)
     assert "Only the agent" in takeaway({"agent": sys_["agent"]})
+
+
+def test_takeaway_follows_the_paired_test_not_the_raw_gap():
+    from api.results import takeaway
+
+    sys_ = {s: {"n": 20, "overall": {"mean": m, "spread": None, "repeats": 1}, "by_type": {},
+                "llm_calls": 3, "p50_latency": 1.0} for s, m in [("workflow", 0.5), ("agent", 0.9)]}
+    strong = {"pairs": 20, "both": 10, "only_first": 0, "only_second": 8, "neither": 2, "p_value": 0.0078}
+    weak = {**strong, "only_first": 3, "only_second": 5, "p_value": 0.73}
+    assert "The agent succeeds more often" in takeaway(sys_, strong)
+    assert "not significantly different" in takeaway(sys_, weak)
 
 
 @pytest.mark.parametrize("run, code", [("../secrets.jsonl", 400), ("x.txt", 400),
