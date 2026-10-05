@@ -190,9 +190,11 @@ def get_checkpointer():
     return _CHECKPOINTER
 
 
-def _config(thread_id: str) -> dict:
+def _config(thread_id: str, extra: dict | None = None) -> dict:
     # The budget (8 LLM steps) is the real limit; this only stops a wiring bug.
-    return {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
+    # `extra` carries optional LangSmith tags; it is empty unless tracing is on,
+    # so the default behaviour is unchanged.
+    return {"configurable": {"thread_id": thread_id}, "recursion_limit": 100, **(extra or {})}
 
 
 def _status(graph, thread_id: str) -> tuple[dict, dict | None]:
@@ -202,30 +204,40 @@ def _status(graph, thread_id: str) -> tuple[dict, dict | None]:
     return dict(snap.values), (pending[0] if pending else None)
 
 
-def start(graph, question: str, thread_id: str, injected_passage: str | None = None):
+def start(graph, question: str, thread_id: str, injected_passage: str | None = None,
+          extra_config: dict | None = None):
     """Start a run; returns (state, approval payload or None if the run finished)."""
     init = initial_state(question, injected_passage)
     init.update(messages=[{"role": "system", "content": AGENT_SYSTEM},
                           {"role": "user", "content": question}],
                 pending=[], call_keys=[], loop_hits=0)
-    graph.invoke(init, _config(thread_id))
+    graph.invoke(init, _config(thread_id, extra_config))
     return _status(graph, thread_id)
 
 
-def resume(graph, thread_id: str, approved: bool):
-    """Resume a paused run with the human's decision; same return shape as `start`."""
-    graph.invoke(Command(resume=bool(approved)), _config(thread_id))
+def resume(graph, thread_id: str, approved: bool, extra_config: dict | None = None):
+    """Resume a paused run with the human's decision; same return shape as `start`.
+
+    The trace tags are passed again here so a resumed run lands in the same
+    LangSmith project and carries the same system tag - otherwise the half of an
+    agent run that follows a human approval would be untagged, which is exactly
+    the half worth looking at.
+    """
+    graph.invoke(Command(resume=bool(approved)), _config(thread_id, extra_config))
     return _status(graph, thread_id)
 
 
 def run_agent(llm, question: str, thread_id: str, *, injected_passage: str | None = None,
-              approve: Callable[[dict], bool] | None = None, checkpointer=None) -> dict:
+              approve: Callable[[dict], bool] | None = None, checkpointer=None,
+              extra_config: dict | None = None) -> dict:
     """Run to completion, asking `approve` at each pause; no callback means reject.
 
     Rejecting by default keeps unattended runs (eval, CLI) from writing files.
+    `extra_config` is optional LangSmith tagging; empty unless tracing is on.
     """
     graph = build_agent(llm, checkpointer or get_checkpointer())
-    state, payload = start(graph, question, thread_id, injected_passage)
+    state, payload = start(graph, question, thread_id, injected_passage, extra_config)
     while payload is not None:
-        state, payload = resume(graph, thread_id, bool(approve(payload)) if approve else False)
+        state, payload = resume(graph, thread_id, bool(approve(payload)) if approve else False,
+                                extra_config)
     return state

@@ -12,6 +12,7 @@ import time
 import uuid
 from typing import Callable, Literal
 
+from rr import tracing
 from rr.common import initial_state, to_result
 
 
@@ -36,10 +37,14 @@ def answer_question(system: Literal["workflow", "agent"], question: str, *, run_
             from rr.llm import ChatLLM
 
             llm = ChatLLM()
+        # Empty unless LangSmith is configured, so merging it changes nothing for
+        # anyone who has not opted in. Tagged by system so the two can be filtered
+        # apart and compared - which is the whole point of this project.
+        trace = tracing.run_config(system, run_id, qid)
         if system == "workflow":
             from rr.workflow import build_workflow
 
-            state = build_workflow(llm).invoke(state, {"recursion_limit": 50})
+            state = build_workflow(llm).invoke(state, {"recursion_limit": 50, **trace})
         else:
             from rr.agent import run_agent
 
@@ -47,7 +52,7 @@ def answer_question(system: Literal["workflow", "agent"], question: str, *, run_
             # resumes an old checkpoint by accident.
             thread_id = f"{run_id}:{qid}:{uuid.uuid4().hex[:8]}"
             state = run_agent(llm, question, thread_id, injected_passage=injected_passage,
-                              approve=approve)
+                              approve=approve, extra_config=trace)
     except Exception as exc:  # contract: never raise; report the failure instead
         state = {**state, "error": state.get("error") or f"{type(exc).__name__}: {exc}"}
     return to_result(state, run_id=run_id, system=system, qid=qid,

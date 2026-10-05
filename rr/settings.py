@@ -30,6 +30,15 @@ CORPUS_DESCRIPTIONS = {
     "ai_act_sections": "EU AI Act primer, split into sections (French).",
 }
 
+# --- Tracing (LangSmith, optional) -------------------------------------------
+# LangGraph traces every node by itself once both of these are set; there is no
+# client to build here. Read through settings like everything else so the two
+# systems cannot end up traced under different projects.
+# Note what it costs: traces leave the machine. See rr/tracing.py.
+LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "").lower() == "true"
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "route-or-roam")
+
 # --- LLM ---------------------------------------------------------------------
 LLM_PROVIDER = os.getenv("RR_LLM_PROVIDER", "groq")  # groq | ollama
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
