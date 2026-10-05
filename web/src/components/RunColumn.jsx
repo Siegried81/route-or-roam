@@ -1,15 +1,24 @@
+import { useEffect, useState } from "react";
 import { SYSTEM_LABEL, fmt } from "../api.js";
 import Answer from "./Answer.jsx";
 import Timeline from "./Timeline.jsx";
 
-export default function RunColumn({ system, result, loading, budget }) {
+// `state` is only used before a result exists: "running" (this system is being
+// answered now), "queued" (it runs after the other one) or "idle".
+export default function RunColumn({ system, result, state, budget }) {
   const cls = system === "workflow" ? "sys-a" : "sys-b";
   if (!result) {
     return (
       <section className={`card column ${cls}`} aria-label={SYSTEM_LABEL[system]}>
-        <ColumnHeader system={system} status={loading ? "running" : "idle"} />
-        {loading && <div className="skeleton" aria-hidden="true"><div /><div /><div /></div>}
-        {loading && <p className="hint">Running {system}… live model calls can take 20 to 60 seconds.</p>}
+        <ColumnHeader system={system} status={state} />
+        {state === "running" && (
+          <>
+            <div className="skeleton" aria-hidden="true"><div /><div /><div /></div>
+            <p className="hint">Running {system}: <Elapsed /> so far. Live model calls with
+              free-tier rate limits can take 20 to 90 seconds.</p>
+          </>
+        )}
+        {state === "queued" && <p className="hint">Starts when the other system has finished.</p>}
       </section>
     );
   }
@@ -55,8 +64,20 @@ export default function RunColumn({ system, result, loading, budget }) {
   );
 }
 
+// Seconds since this component mounted, updated every second.
+function Elapsed() {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <strong className="elapsed">{Math.round((now - start) / 1000)} s</strong>;
+}
+
 function ColumnHeader({ system, status }) {
-  const label = { done: "done", running: "running", awaiting_approval: "awaiting approval", idle: "" }[status];
+  const label = { done: "done", running: "running", queued: "queued", awaiting_approval: "awaiting approval",
+                  idle: "" }[status];
   return (
     <header className="column-head">
       <h2><span className="swatch" aria-hidden="true" />{SYSTEM_LABEL[system]}</h2>

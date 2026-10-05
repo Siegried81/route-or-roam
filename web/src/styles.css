@@ -7,7 +7,7 @@
   --border: #e2e1dc;
   --text: #17171a;
   --text-secondary: #52514e;
-  --text-muted: #7a7974;
+  --text-muted: #6a6964; /* about 5:1 on --bg: WCAG AA for the small hint text */
   --accent: #2a78d6;
   --accent-ink: #ffffff;
   --series-1: #2a78d6; /* workflow */
@@ -39,6 +39,7 @@
     --text-secondary: #c3c2b7;
     --text-muted: #8f8e86;
     --accent: #3987e5;
+    --accent-ink: #0b1220; /* about 5:1 on the dark accent; white would be 3.6:1 */
     --series-1: #3987e5;
     --series-2: #d95926;
     --ok: #6fd08f;
@@ -160,6 +161,10 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .status { font-size: 0.75rem; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--surface-2); }
 .status.done { background: var(--ok-bg); color: var(--ok); }
 .status.awaiting_approval { background: var(--warn-bg); color: var(--warn); }
+.status.queued { background: var(--surface-2); color: var(--text-muted); }
+.elapsed { font-variant-numeric: tabular-nums; }
+.asked { margin: 0 0 10px; overflow-wrap: anywhere; }
+.asked .muted { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; margin-right: 6px; }
 .status.running { background: var(--info-bg); color: var(--info); animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.55; } }
 
@@ -228,6 +233,8 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-seconda
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .toolbar .field.inline label { margin-right: 8px; }
 .takeaway { font-size: 1.02rem; font-weight: 500; border-left: 4px solid var(--accent); margin: 16px 0 0; }
+.takeaway p { margin: 0; }
+.takeaway p.hint { margin-top: 8px; font-weight: 400; }
 .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
 .grid-2 { display: grid; gap: 16px; grid-template-columns: 1fr; }
 @media (min-width: 900px) { .grid-2 { grid-template-columns: 3fr 2fr; } }
@@ -266,5 +273,8 @@ table.kpi td.best { font-weight: 800; }
 .tag-bar { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
 .tag-bar span { display: block; height: 100%; background: var(--sys); border-radius: 0 4px 4px 0; }
 .tag-count { font-variant-numeric: tabular-nums; color: var(--text-muted); font-size: 0.8rem; }
+
+/* AI disclosure (EU AI Act transparency): always visible, never alarming. */
+.ai-notice { margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 0.82rem; color: var(--text-muted); }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
