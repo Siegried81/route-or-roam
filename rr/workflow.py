@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -21,7 +22,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from rr import fence, settings
 from rr.common import (ANSWER_SYSTEM, CORPUS_LINES, RunState, check_answer, llm_step,
                        record_tool, stop_updates, verify_feedback)
-from rr.tools import Corpus, run_tool
+from rr.tools import Corpus, prefetch_search, run_tool
+
+# Retrieval threads for one search node: a plan has at most 2 corpora x 3
+# sub-queries, and the embedder is a single local Ollama process, so more
+# threads than this would only queue on it.
+SEARCH_WORKERS = 3
 
 PLAN_SYSTEM = (
     "You plan document searches for a question. Available corpora:\n"
@@ -50,6 +56,9 @@ class Plan(BaseModel):
 
 
 class _Expr(BaseModel):
+    """The one arithmetic expression the model may return; extra keys are rejected like in Plan."""
+
+    model_config = ConfigDict(extra="forbid")
     expression: str = Field(min_length=1, max_length=200)
 
 
@@ -87,16 +96,24 @@ def build_workflow(llm):
         return {**upd, "plan": p}
 
     def search(state: RunState) -> dict:
-        """Run every planned sub-query against every planned corpus, through the shared registry."""
+        """Run every planned sub-query against every planned corpus, through the shared registry.
+
+        Retrieval is local (embeddings and indexes, no rate limit), so the calls
+        are fetched in parallel; the results are then registered one call at a
+        time in plan order, so the sids, the trace and every count are exactly
+        what a sequential run produces. Only wall-clock latency changes.
+        """
+        calls = [{"query": q, "corpus": corpus, "k": settings.SEARCH_K}
+                 for corpus in state["plan"]["corpora"] for q in state["plan"]["sub_queries"]]
+        with ThreadPoolExecutor(max_workers=min(len(calls), SEARCH_WORKERS)) as pool:
+            fetched = list(pool.map(prefetch_search, calls))
         upd: dict = {}
         cur = dict(state)
-        for corpus in state["plan"]["corpora"]:
-            for q in state["plan"]["sub_queries"]:
-                args = {"query": q, "corpus": corpus, "k": settings.SEARCH_K}
-                res = run_tool("search_documents", args, cur["passages"],
-                               injected_passage=state.get("injected_passage"))
-                upd = record_tool(cur, "search_documents", args, res)
-                cur.update(upd)
+        for args, hits in zip(calls, fetched):
+            res = run_tool("search_documents", args, cur["passages"],
+                           injected_passage=state.get("injected_passage"), prefetched=hits)
+            upd = record_tool(cur, "search_documents", args, res)
+            cur.update(upd)
         return upd
 
     def calculate(state: RunState) -> dict:
