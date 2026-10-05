@@ -112,7 +112,12 @@ def check_answer(answer: str, passages: list[dict]) -> dict:
     # so the stored answer, the UI and the score all see the same citations.
     answer = grounded.gr_answer.normalize_citations(answer)
     report = grounded.verify(answer, as_retrieved(passages))
-    refused = grounded.REFUSAL_MESSAGE in answer
+    # A refusal is grounded-rag's exact refusal sentence in any of its languages
+    # (a question asked in French is often refused in French), and it cites
+    # nothing: an answer that cites a source after a refusal sentence is making
+    # a claim, so it is scored as an answer, not as a refusal.
+    refused = (not report.valid_citations
+               and any(m in answer for m in grounded.REFUSAL_MESSAGE_SET))
     return {
         "answer": answer,
         "refused": refused,

@@ -44,6 +44,30 @@ def test_budget_exhaustion_stops_at_max_steps():
     assert res["budget_exhausted"] and res["answer"] == BUDGET_MESSAGE and res["error"] is None
 
 
+def test_last_step_is_made_without_tools_and_asks_to_answer_or_refuse():
+    searches = [tool_reply(("search_documents", {"query": f"q{i}", "corpus": "filings_sections"}))
+                for i in range(settings.MAX_STEPS - 1)]
+    res, fake = _run(searches + [GOOD])
+    last = fake.requests[-1]
+    assert last["tools"] is None and "last call" in last["messages"][-1]["content"]
+    assert all(r["tools"] for r in fake.requests[:-1])
+    assert res["answer"] == GOOD and not res["budget_exhausted"]
+    assert res["llm_calls"] == settings.MAX_STEPS  # the budget was not extended
+
+
+def test_a_tool_call_on_the_last_step_is_dropped_not_run():
+    searches = [tool_reply(("search_documents", {"query": f"q{i}", "corpus": "filings_sections"}))
+                for i in range(settings.MAX_STEPS)]
+    res, _ = _run(searches)
+    assert len(res["tool_calls"]) == settings.MAX_STEPS - 1
+
+
+def test_a_repeated_unknown_tool_is_counted_as_hallucinated():
+    res, _ = _run([tool_reply(("browse_web", {"url": "x"}))] * 3)
+    assert [c["error"] for c in res["tool_calls"]] == ["hallucinated_tool", "hallucinated_tool"]
+    assert res["hallucinated_tools"] == 2 and res["answer"] == LOOP_MESSAGE
+
+
 def test_repeated_call_is_blocked_then_run_ends():
     res, _ = _run([tool_reply(SEARCH)] * 3)
     assert [c["error"] for c in res["tool_calls"]] == [None, "loop_detected"]

@@ -40,3 +40,18 @@ def exhausted(budget: dict) -> str | None:
     if budget["tokens_in"] + budget["tokens_out"] >= budget["max_tokens"]:
         return "max_tokens"
     return None
+
+
+#: Share of the token budget after which the next call is treated as the last one.
+LAST_CALL_TOKEN_SHARE = 0.8
+
+
+def nearly_exhausted(budget: dict) -> bool:
+    """True when the next call should be the run's last: one step left, or 80% of tokens used.
+
+    Only meaningful while `exhausted` is still None. A loop-shaped system uses it
+    to stop exploring and answer with what it has; it never adds a call.
+    """
+    used = budget["tokens_in"] + budget["tokens_out"]
+    return (budget["steps"] >= budget["max_steps"] - 1
+            or used >= LAST_CALL_TOKEN_SHARE * budget["max_tokens"])
