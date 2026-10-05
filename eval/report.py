@@ -11,6 +11,16 @@ Why it is built this way:
 - Success is first computed per repeat, then summarised as mean +/- sample
   standard deviation across repeats. That spread is the run-to-run variance of
   a system on the same questions, which is the thing a single number hides.
+  With a single repeat there is no spread to observe, so it is reported as
+  n/a, never as a reassuring "± 0.0".
+- Sampling uncertainty (how much the rate could move with other questions of
+  the same kind) is a different thing from run-to-run spread, and is shown as
+  a 95% Wilson interval over all scored records, with the record count next to
+  every rate. Repeats of one question are not independent, so with several
+  repeats this interval is optimistic; it is a floor on the uncertainty.
+- Workflow and agent answer the same questions, so they are compared with an
+  exact McNemar test on (question, repeat) pairs (see eval/stats.py), not by
+  eyeballing the gap between two rates.
 - Latency uses nearest-rank percentiles (p50/p95), no interpolation, so every
   reported value is a latency that actually happened.
 - matplotlib is optional: without it the markdown is still written and the
@@ -28,6 +38,7 @@ from pathlib import Path
 
 from eval.run_compare import PROJECT_ROOT, QUESTIONS_PATH, load_questions
 from eval.score import score_record
+from eval.stats import paired_outcomes, wilson
 
 TYPE_ORDER = ["single_hop", "multi_hop", "numeric", "cross_corpus", "unanswerable", "injection"]
 
@@ -56,12 +67,13 @@ def percentile(values: list[float], pct: float) -> float | None:
 def mean_spread(per_repeat: dict[int, list[bool]]) -> tuple[float | None, float | None, int]:
     """Mean and sample std of the per-repeat success rate, plus the repeat count.
 
-    The std is 0.0 with a single repeat (no spread observable), None if no data.
+    The std is None with a single repeat: no spread is observable, and 0.0
+    would read as "perfectly stable". Mean is None too if there is no data.
     """
     rates = [sum(v) / len(v) for v in per_repeat.values() if v]
     if not rates:
         return None, None, 0
-    spread = statistics.stdev(rates) if len(rates) > 1 else 0.0
+    spread = statistics.stdev(rates) if len(rates) > 1 else None
     return statistics.mean(rates), spread, len(rates)
 
 
@@ -87,19 +99,25 @@ def aggregate(runs: list[dict], questions: list[dict]) -> dict:
             continue
         grouped[rec["system"]].append((rec, q, score_record(q, rec)))
 
+    outcomes: dict[str, dict[tuple, bool]] = {}
     for system, items in sorted(grouped.items()):
         overall: dict[int, list[bool]] = defaultdict(list)
         by_type: dict[str, dict[int, list[bool]]] = defaultdict(lambda: defaultdict(list))
         for rec, q, s in items:
             overall[rec.get("repeat", 0)].append(s["passed"])
             by_type[q["type"]][rec.get("repeat", 0)].append(s["passed"])
+        outcomes[system] = {(rec["qid"], rec.get("repeat", 0)): s["passed"] for rec, _, s in items}
         injected = [s["injection_followed"] for rec, q, s in items if q.get("injected_passage")]
         tags = Counter(s["failure_tag"] for _, _, s in items if s["failure_tag"])
         n = len(items)
+        passed = sum(s["passed"] for _, _, s in items)
         out["systems"][system] = {
             "n": n,
+            "passed": passed,
+            "wilson": wilson(passed, n),
             "overall": mean_spread(overall),
             "by_type": {t: mean_spread(by_type[t]) for t in TYPE_ORDER if t in by_type},
+            "n_by_type": {t: sum(len(v) for v in by_type[t].values()) for t in TYPE_ORDER if t in by_type},
             "llm_calls": _avg([r.get("llm_calls") for r, _, _ in items]),
             "tokens_in": _avg([r.get("tokens_in") for r, _, _ in items]),
             "tokens_out": _avg([r.get("tokens_out") for r, _, _ in items]),
@@ -110,14 +128,58 @@ def aggregate(runs: list[dict], questions: list[dict]) -> dict:
             "source_recall": _avg([s["source_recall"] for _, _, s in items]),
             "tool_use_pct": 100 * sum(s["tool_use_ok"] for _, _, s in items) / n,
             "top_tags": tags.most_common(3),
+            "phrasing": phrasing_consistency(items),
         }
+    # Paired comparison on the (question, repeat) pairs both systems answered;
+    # "first" is the workflow, "second" the agent.
+    out["paired"] = (paired_outcomes(outcomes["workflow"], outcomes["agent"])
+                     if {"workflow", "agent"} <= outcomes.keys() else None)
     return out
 
 
-def _pct(ms: tuple) -> str:
-    """Format a (mean, spread, repeats) triple as 'xx.x% +/- y.y'."""
+def phrasing_consistency(items: list[tuple[dict, dict, dict]]) -> dict | None:
+    """How often a system gives the same verdict to every phrasing of one question.
+
+    Only for question sets that mark rephrasings with ``paraphrase_of``
+    (eval/paraphrases.jsonl): each original and its rephrasings form a group,
+    and a group is consistent when all its records pass or all fail. A system
+    that only works with the "right" wording shows up as mixed groups even
+    when its overall rate looks fine. None for sets without rephrasings.
+    """
+    groups: dict[str, list[bool]] = defaultdict(list)
+    for _, q, s in items:
+        if "paraphrase_of" in q:
+            groups[q["paraphrase_of"] or q["id"]].append(s["passed"])
+    if not groups:
+        return None
+    mixed = sorted(g for g, v in groups.items() if len(set(v)) > 1)
+    return {"groups": len(groups), "consistent": len(groups) - len(mixed), "mixed": mixed}
+
+
+def _pct(ms: tuple, n: int | None = None) -> str:
+    """Format a (mean, spread, repeats) triple as 'xx.x% ± y.y', with '(n=…)' when n is given."""
     mean, spread, _ = ms
-    return "n/a" if mean is None else f"{100 * mean:.1f}% ± {100 * spread:.1f}"
+    if mean is None:
+        return "n/a"
+    sd = "n/a" if spread is None else f"{100 * spread:.1f}"
+    return f"{100 * mean:.1f}% ± {sd}" + (f" (n={n})" if n is not None else "")
+
+
+def _ci(interval) -> str:
+    """Format a Wilson (low, high) interval in percent."""
+    return "n/a" if interval is None else f"{100 * interval[0]:.0f}–{100 * interval[1]:.0f}%"
+
+
+def paired_sentence(paired: dict | None) -> str | None:
+    """Plain-language McNemar result for the report and the UI; None without pairs."""
+    if not paired or not paired["pairs"]:
+        return None
+    b, c, p = paired["only_first"], paired["only_second"], paired["p_value"]
+    verdict = ("a significant difference at the 5% level" if p < 0.05
+               else "no significant difference at the 5% level")
+    return (f"Paired on {paired['pairs']} (question, repeat) pairs: only the workflow passed {b}, "
+            f"only the agent passed {c}, both {paired['both']}, neither {paired['neither']}. "
+            f"Exact McNemar p = {p:.3f}: {verdict}.")
 
 
 def _num(v, fmt: str = "{:.1f}") -> str:
@@ -130,15 +192,24 @@ def render_markdown(agg: dict, runs_name: str, png_note: str) -> str:
     lines = [f"# Results: `{runs_name}`", "",
              "Success = all key facts present (numbers ±1%), cited when answering, refusal exactly "
              "when expected, no forbidden string. Full definition: `eval/score.py`. "
-             "Rates are mean ± sample std across repeats.", ""]
+             "Rates are mean ± sample std across repeats (n/a with one repeat); the 95% "
+             "interval is a Wilson interval over all scored records (`eval/stats.py`).", ""]
     if agg["unknown_qids"]:
         lines += [f"> {agg['unknown_qids']} record(s) skipped: qid not in questions.jsonl.", ""]
+    sentence = paired_sentence(agg.get("paired"))
+    if sentence:
+        lines += ["## Workflow vs agent (paired)", "", sentence, ""]
     for system, m in agg["systems"].items():
         tags = ", ".join(f"{t} ({c})" for t, c in m["top_tags"]) or "none"
         lines += [f"## {system}", "", "| metric | value |", "|---|---|",
                   f"| records | {m['n']} ({m['overall'][2]} repeats) |",
-                  f"| overall success | {_pct(m['overall'])} |"]
-        lines += [f"| success: {t} | {_pct(ms)} |" for t, ms in m["by_type"].items()]
+                  f"| overall success | {_pct(m['overall'])} ({m['passed']}/{m['n']}) |",
+                  f"| overall success, 95% interval | {_ci(m['wilson'])} |"]
+        lines += [f"| success: {t} | {_pct(ms, m['n_by_type'][t])} |" for t, ms in m["by_type"].items()]
+        if m["phrasing"]:
+            ph = m["phrasing"]
+            mixed = f" (mixed: {', '.join(ph['mixed'])})" if ph["mixed"] else ""
+            lines.append(f"| same verdict for every phrasing | {ph['consistent']}/{ph['groups']} questions{mixed} |")
         lines += [f"| avg LLM calls | {_num(m['llm_calls'], '{:.2f}')} |",
                   f"| avg tokens in / out | {_num(m['tokens_in'], '{:.0f}')} / {_num(m['tokens_out'], '{:.0f}')} |",
                   f"| latency p50 / p95 (s) | {_num(m['p50_latency'], '{:.2f}')} / {_num(m['p95_latency'], '{:.2f}')} |",
@@ -152,8 +223,8 @@ def render_markdown(agg: dict, runs_name: str, png_note: str) -> str:
         lines += ["## Success by question type", "",
                   "| type | " + " | ".join(systems) + " |", "|---|" + "---|" * len(systems)]
         for t in TYPE_ORDER:
-            cells = [_pct(agg["systems"][s]["by_type"][t]) if t in agg["systems"][s]["by_type"] else "n/a"
-                     for s in systems]
+            cells = [_pct(agg["systems"][s]["by_type"][t], agg["systems"][s]["n_by_type"][t])
+                     if t in agg["systems"][s]["by_type"] else "n/a" for s in systems]
             if any(c != "n/a" for c in cells):
                 lines.append(f"| {t} | " + " | ".join(cells) + " |")
         lines.append("")

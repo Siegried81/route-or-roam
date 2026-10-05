@@ -95,3 +95,69 @@ def test_filters_and_cli(tmp_path, monkeypatch):
     run_compare.main(["--run-id", "cli", "--repeats", "1", "--systems", "workflow",
                       "--questions", str(qfile), "--runs-dir", str(tmp_path)])
     assert [c[0] for c in fake.calls] == ["workflow", "workflow"]
+    rows = _lines(tmp_path / "cli.jsonl")
+    assert all({"provider", "model", "llm_cache", "max_steps", "max_tokens"} <= set(r) for r in rows)
+
+
+def test_estimate_prints_the_worst_case_and_makes_no_call(tmp_path, monkeypatch, capsys):
+    qfile = tmp_path / "q.jsonl"
+    qfile.write_text("\n".join(json.dumps(q) for q in QS), encoding="utf-8")
+    fake = FakeAnswer()
+    monkeypatch.setattr(run_compare, "_default_answer_fn", lambda: fake)
+    run_compare.main(["--run-id", "est", "--repeats", "3", "--questions", str(qfile),
+                      "--runs-dir", str(tmp_path), "--estimate"])
+    out = capsys.readouterr().out
+    assert fake.calls == [] and not (tmp_path / "est.jsonl").exists()
+    assert "12 call(s) to make" in out  # 2 questions x 2 systems x 3 repeats
+
+
+def test_estimate_line():
+    assert run_compare.estimate(4, 8, 12000) == (
+        "4 call(s) to make; at most 32 LLM calls and 48,000 tokens "
+        "(budget 8 steps / 12,000 tokens per call)")
+
+
+class ConcurrentAnswer(FakeAnswer):
+    """FakeAnswer that records the client and thread of each call.
+
+    conftest turns time.sleep into a no-op, so overlap is forced with a barrier:
+    two calls must be in flight at once or the wait times out and the test fails.
+    """
+
+    def __init__(self):
+        import threading
+
+        super().__init__()
+        self.barrier = threading.Barrier(2, timeout=2)
+        self.seen = []
+
+    def __call__(self, system, question, *, run_id, qid, llm=None, injected_passage=None, approve=None):
+        import threading
+
+        self.seen.append((system, qid, llm, threading.get_ident()))
+        self.barrier.wait()
+        return super().__call__(system, question, run_id=run_id, qid=qid)
+
+
+def test_workers_run_in_parallel_with_one_client_each(tmp_path):
+    fake = ConcurrentAnswer()
+    stats = run_compare.run("r1", QS, repeats=1, runs_dir=tmp_path, answer_fn=fake,
+                            log=lambda m: None, llms=["client-A", "client-B"])
+    assert stats == {"done": 4, "skipped": 0, "failed": 0}
+    assert {c[2] for c in fake.seen} == {"client-A", "client-B"}
+    assert len({c[3] for c in fake.seen}) > 1
+    rows = _lines(tmp_path / "r1.jsonl")
+    assert len(rows) == 4 and len({r["key"] for r in rows}) == 4
+    # Resuming with workers skips everything already done.
+    again = run_compare.run("r1", QS, repeats=1, runs_dir=tmp_path, answer_fn=FakeAnswer(),
+                            log=lambda m: None, llms=["client-A", "client-B"])
+    assert again == {"done": 0, "skipped": 4, "failed": 0}
+
+
+def test_make_worker_llms_pins_one_groq_key_per_worker(monkeypatch):
+    from rr import settings
+
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(settings, "GROQ_API_KEYS", ["k1", "k2"])
+    assert [llm.keys for llm in run_compare.make_worker_llms(5)] == [["k1"], ["k2"]]
+    assert [llm.keys for llm in run_compare.make_worker_llms(1)] == [["k1"]]
