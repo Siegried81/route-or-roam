@@ -142,7 +142,7 @@ python -m eval.run_compare --run-id r1 --repeats 3              # resumable: reu
 python -m eval.report --runs runs/r1.jsonl                      # -> docs/results.md + chart
 python -m eval.run_compare --run-id p1 --questions eval/paraphrases.jsonl   # same question, three phrasings
 python -m eval.report --runs runs/p1.jsonl --questions eval/paraphrases.jsonl --out runs/p1.md
-python -m pytest -q                                             # 184 tests, offline
+python -m pytest -q                                             # 189 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`
