@@ -28,10 +28,13 @@ from rag.verify import VerificationReport, verify_answer  # noqa: E402
 # Re-exported so the rest of rr never copies grounded-rag's prompt text.
 SYSTEM_PROMPT = gr_answer.SYSTEM_PROMPT
 REFUSAL_MESSAGE = gr_answer.REFUSAL_MESSAGE
+# The exact refusal sentence in every language grounded-rag answers in (en/fr/nl).
+REFUSAL_MESSAGE_SET = gr_answer.REFUSAL_MESSAGE_SET
 VERIFY_MIN_GROUNDING = gr_config.VERIFY_MIN_GROUNDING
 
 __all__ = [
     "Chunk", "Retrieved", "VerificationReport", "SYSTEM_PROMPT", "REFUSAL_MESSAGE",
+    "REFUSAL_MESSAGE_SET",
     "VERIFY_MIN_GROUNDING", "search_corpus", "list_corpus_sections", "verify",
 ]
 

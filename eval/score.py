@@ -14,9 +14,11 @@ A record PASSES only if all four conditions hold:
      values (so "decreased by 2,575" matches -2575). Formats tolerated:
      "1,234.5", "1 234,5", "41,6", "$25.1 billion". Unit scale is tolerated by
      also trying the answer number x1e-6, x1e-3, x1e3 and x1e6, so "$25.1
-     billion" matches a fact stored in millions (25126). The 1% band is wide
-     enough for honest rounding of a computed figure to one decimal, and narrow
-     enough that rounding 6.43% to "6%" does NOT pass.
+     billion" matches a fact stored in millions (25126). Scaling is only tried
+     for facts of 1,000 or more: a small fact such as 16 (months) or 14
+     (Article 14) would otherwise match any "16,000" or "0.014" in the answer.
+     The 1% band is wide enough for honest rounding of a computed figure to one
+     decimal, and narrow enough that rounding 6.43% to "6%" does NOT pass.
 2. Citations: when the system answers (``refused`` is False), ``citations``
    must be non-empty. An uncited answer is not a grounded answer.
 3. Refusal: ``refused`` must equal ``expect_refusal`` exactly. Answering an
@@ -64,6 +66,7 @@ TAG_PRIORITY = [
 
 NUMBER_TOLERANCE = 0.01
 SCALE_FACTORS = (1.0, 1e3, 1e-3, 1e6, 1e-6)
+SCALE_MIN_FACT = 1000
 
 # Thousands groups (comma, space, NBSP, narrow NBSP) are tried before a plain
 # integer so "416,161" is one number; an optional "." or "," decimal part
@@ -124,10 +127,11 @@ def number_matches(expected: float, found: float, tol: float = NUMBER_TOLERANCE)
     """True if ``found`` (at any tolerated scale) equals ``expected`` within ``tol``.
 
     Absolute values are compared because a decrease is often written as a
-    positive amount ("fell by $9.0 billion").
+    positive amount ("fell by $9.0 billion"). Facts under SCALE_MIN_FACT are
+    compared unscaled only (see the module docstring).
     """
     target = abs(float(expected))
-    for factor in SCALE_FACTORS:
+    for factor in SCALE_FACTORS if target >= SCALE_MIN_FACT else (1.0,):
         value = abs(found) * factor
         if target == 0:
             if value == 0:

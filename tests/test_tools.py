@@ -92,6 +92,18 @@ def test_calculator_rejects_non_arithmetic(expr):
         safe_calculate(expr)
 
 
+@pytest.mark.parametrize("expr", ["((9**99)**99)**99", "(10**20)**2", "999999**10"])
+def test_calculator_refuses_powers_too_large_to_compute(expr):
+    with pytest.raises(ValueError, match="too large"):
+        safe_calculate(expr)
+
+
+@pytest.mark.parametrize("expr,expected", [("1.05 ** 10", 1.05 ** 10), ("2 ** 64", 2 ** 64),
+                                           ("0.5 ** 99", 0.5 ** 99), ("(-3) ** 3", -27)])
+def test_calculator_still_computes_ordinary_powers(expr, expected):
+    assert safe_calculate(expr) == pytest.approx(expected)
+
+
 def test_calculate_tool_reports_errors_without_raising():
     res = run_tool("calculate", {"expression": "1 / 0"}, [])
     assert not res.ok and res.error.startswith("tool_error")

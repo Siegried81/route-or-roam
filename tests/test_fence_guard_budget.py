@@ -34,6 +34,14 @@ def test_budget_steps_and_tokens():
     assert budget.exhausted(budget.charge(budget.new_budget(max_tokens=100), 90, 10)) == "max_tokens"
 
 
+def test_nearly_exhausted_on_last_step_or_80_percent_of_tokens():
+    b = budget.new_budget(max_steps=8, max_tokens=1000)
+    assert not budget.nearly_exhausted(b)
+    assert not budget.nearly_exhausted(budget.charge(b, 700, 99))
+    assert budget.nearly_exhausted(budget.charge(b, 700, 100))
+    assert budget.nearly_exhausted({**b, "steps": 7})
+
+
 def test_budget_defaults_match_spec():
     b = budget.new_budget()
     assert (b["max_steps"], b["max_tokens"]) == (8, 12000)

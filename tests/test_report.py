@@ -48,7 +48,8 @@ def test_percentile_nearest_rank():
 def test_mean_spread():
     mean, sd, n = report.mean_spread({0: [True, True], 1: [True, False]})
     assert mean == pytest.approx(0.75) and sd == pytest.approx(0.353553, rel=1e-4) and n == 2
-    assert report.mean_spread({0: [True]}) == (1.0, 0.0, 1)
+    # One repeat: no spread is observable, so it is None rather than a reassuring 0.0.
+    assert report.mean_spread({0: [True]}) == (1.0, None, 1)
 
 
 def test_aggregate_metrics():
@@ -64,6 +65,41 @@ def test_aggregate_metrics():
     assert ag["llm_calls"] == pytest.approx(3.0)
     assert ag["p50_latency"] == 6.0 and ag["p95_latency"] == 8.0
     assert dict(ag["top_tags"]) == {"loop_or_budget": 1, "wrong_number": 1}
+    assert (wf["passed"], wf["n"]) == (3, 4) and wf["n_by_type"] == {"single_hop": 2, "injection": 2}
+    assert wf["wilson"][0] < 0.75 < wf["wilson"][1]
+
+
+def test_phrasing_consistency_groups_rephrasings_with_their_original():
+    qs = [{**QS[0], "paraphrase_of": None}, {**QS[0], "id": "a-fr", "paraphrase_of": "a"},
+          {**QS[1], "paraphrase_of": None}, {**QS[1], "id": "b-fr", "paraphrase_of": "b"}]
+    runs = [_rec("agent", "a", 0, "1", 1.0), _rec("agent", "a-fr", 0, "nope", 1.0),
+            _rec("agent", "b", 0, "2", 1.0), _rec("agent", "b-fr", 0, "2", 1.0)]
+    agg = report.aggregate(runs, qs)
+    assert agg["systems"]["agent"]["phrasing"] == {"groups": 2, "consistent": 1, "mixed": ["a"]}
+    text = report.render_markdown(agg, "p.jsonl", "")
+    assert "| same verdict for every phrasing | 1/2 questions (mixed: a) |" in text
+    assert report.aggregate(RUNS, QS)["systems"]["agent"]["phrasing"] is None
+
+
+def test_paraphrase_set_matches_its_originals():
+    root = Path(__file__).resolve().parents[1] / "eval"
+    load = lambda p: [json.loads(l) for l in (root / p).read_text(encoding="utf-8").splitlines() if l.strip()]
+    originals = {q["id"]: q for q in load("questions.jsonl")}
+    paraphrases = load("paraphrases.jsonl")
+    assert len({q["id"] for q in paraphrases}) == len(paraphrases)
+    for q in paraphrases:
+        src = originals[q["paraphrase_of"] or q["id"]]
+        same = ("type", "gold_sources", "key_facts", "expect_refusal", "forbidden_strings")
+        assert all(q[k] == src[k] for k in same), q["id"]
+        assert (q["question"] == src["question"]) == (q["paraphrase_of"] is None)
+
+
+def test_aggregate_pairs_the_two_systems_by_question_and_repeat():
+    paired = report.aggregate(RUNS, QS)["paired"]
+    # a/0 and a/1 both pass; b/0 only the workflow; b/1 neither (injection vs wrong number).
+    assert paired == {"pairs": 4, "both": 2, "only_first": 1, "only_second": 0, "neither": 1,
+                      "p_value": 1.0}
+    assert report.aggregate([r for r in RUNS if r["system"] == "agent"], QS)["paired"] is None
 
 
 def _write_inputs(tmp_path):
@@ -80,8 +116,10 @@ def test_build_report_writes_markdown(tmp_path):
     report.build_report(runs, qfile, out, png)
     text = out.read_text(encoding="utf-8")
     assert "## workflow" in text and "## agent" in text
-    assert "75.0% ± 35.4" in text and "| injection followed | 50.0% |" in text
-    assert "## Success by question type" in text
+    assert "75.0% ± 35.4 (3/4)" in text and "| injection followed | 50.0% |" in text
+    assert "## Success by question type" in text and "(n=2)" in text
+    assert "## Workflow vs agent (paired)" in text and "Exact McNemar p = 1.000" in text
+    assert "95% interval" in text
 
 
 def test_report_degrades_without_matplotlib(tmp_path, monkeypatch):

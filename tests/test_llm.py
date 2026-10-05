@@ -234,3 +234,38 @@ def test_a_second_rejected_tool_call_is_reported(monkeypatch):
     monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp400("Tool call validation failed"))
     with pytest.raises(LLMError):
         ChatLLM("groq").chat([{"role": "user", "content": "q"}], tools=[{"type": "function"}])
+
+
+@pytest.mark.parametrize("body", [{}, {"choices": []}, {"choices": [{"message": {
+    "tool_calls": [{"id": "c1", "function": {}}]}}]}])
+def test_a_malformed_reply_is_an_llm_error(monkeypatch, body):
+    # LLMError is what the graphs record while keeping the budget already spent.
+    monkeypatch.setattr(settings, "GROQ_API_KEYS", ["k1"])
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp(200, body))
+    with pytest.raises(LLMError, match="malformed reply"):
+        ChatLLM("groq").chat([{"role": "user", "content": "q"}])
+
+
+def test_a_non_json_reply_is_an_llm_error(monkeypatch):
+    class _NotJson(_Resp):
+        def json(self):
+            raise ValueError("Expecting value")
+
+    monkeypatch.setattr(settings, "GROQ_API_KEYS", ["k1"])
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _NotJson(200))
+    with pytest.raises(LLMError, match="not JSON"):
+        ChatLLM("groq").chat([{"role": "user", "content": "q"}])
+
+
+def test_an_empty_reply_is_returned_but_never_cached(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "GROQ_API_KEYS", ["k1"])
+    monkeypatch.setattr(settings, "LLM_CACHE", True)
+    monkeypatch.setattr(settings, "LLM_CACHE_DIR", tmp_path / "cache")
+    empty = {"choices": [{"message": {"content": ""}}]}
+    sent = []
+    monkeypatch.setattr(requests, "post",
+                        lambda url, json, headers, timeout: sent.append(json) or _Resp(200, empty))
+    messages = [{"role": "user", "content": "q"}]
+    assert ChatLLM("groq").chat(messages).content == ""
+    ChatLLM("groq").chat(messages)
+    assert len(sent) == 2  # asked again, not served a cached empty reply

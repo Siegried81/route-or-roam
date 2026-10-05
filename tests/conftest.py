@@ -50,6 +50,8 @@ def offline(monkeypatch, tmp_path):
 
     monkeypatch.setattr(requests, "post", no_network)
     monkeypatch.setattr(requests, "get", no_network)
+    # Any other requests entry point (Session, request, put...) goes through here.
+    monkeypatch.setattr(requests.Session, "request", no_network)
     monkeypatch.setattr(grounded, "search_corpus", lambda q, corpus, k: fake_hits(corpus, k))
     monkeypatch.setattr(settings, "REPORTS_DIR", tmp_path / "reports")
     monkeypatch.setattr(settings, "LLM_CACHE_DIR", tmp_path / "llm_cache")

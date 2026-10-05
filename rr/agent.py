@@ -16,17 +16,20 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from typing import Callable
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from rr import budget as budget_mod
+from rr import grounded
 from rr import guard as guard_mod
 from rr import settings
 from rr.common import (ANSWER_SYSTEM, CORPUS_LINES, RunState, check_answer, initial_state,
                        llm_step, record_tool, stop_updates, verify_feedback)
-from rr.tools import ToolResult, run_tool, tool_schemas
+from rr.tools import TOOLS, ToolResult, run_tool, tool_schemas
 
 AGENT_SYSTEM = (
     f"{ANSWER_SYSTEM}\n\n"
@@ -34,6 +37,12 @@ AGENT_SYSTEM = (
     "Search before answering; search the French corpus in French. Use calculate for any "
     "arithmetic. Call save_report only if the user explicitly asks for a saved report. "
     "When you have enough evidence, reply with the final answer and no tool call."
+)
+
+LAST_CALL_INSTRUCTION = (
+    "Budget nearly spent: this is your last call and no tools are available. Answer now "
+    "from the sources above, citing each claim with its id, or reply exactly: "
+    f"{grounded.REFUSAL_MESSAGE}"
 )
 
 BLOCKED_OUTPUT = ("Duplicate call blocked: you already received this exact result. Use it, "
@@ -45,10 +54,25 @@ def build_agent(llm, checkpointer=None):
     schemas = tool_schemas()
 
     def agent(state: RunState) -> dict:
-        """One LLM call with the tools offered; tool requests become `pending`."""
-        resp, upd = llm_step(llm, state, state["messages"], tools=schemas, tool_choice="auto")
+        """One LLM call with the tools offered; tool requests become `pending`.
+
+        When the budget is nearly spent, the call is made without tools and with
+        a last-call instruction, so the agent ends with an answer or a refusal
+        instead of being cut off mid-search. The workflow has the same guarantee
+        by construction (its last node always answers), so this aligns the two
+        systems rather than favouring one. The instruction is sent but not kept
+        in the stored messages, which stay the model's own conversation.
+        """
+        last_call = budget_mod.nearly_exhausted(state["budget"])
+        if last_call:
+            resp, upd = llm_step(llm, state, state["messages"] + [
+                {"role": "system", "content": LAST_CALL_INSTRUCTION}])
+        else:
+            resp, upd = llm_step(llm, state, state["messages"], tools=schemas, tool_choice="auto")
         if resp is None:
             return upd
+        if last_call and resp.tool_calls:
+            resp = replace(resp, tool_calls=[])  # no tool can run any more; keep the text
         msg: dict = {"role": "assistant", "content": resp.content}
         if resp.tool_calls:
             msg["tool_calls"] = [{"id": c.id, "type": "function",
@@ -82,7 +106,11 @@ def build_agent(llm, checkpointer=None):
         upd: dict = {}
         messages = list(state["messages"])
         for call in state["pending"]:
-            if call["verdict"] == "block":
+            if call["verdict"] == "block" and call["name"] not in TOOLS:
+                # A repeated call to a tool that does not exist is still a
+                # hallucinated tool, and is counted as one, not only as a loop.
+                res = ToolResult(False, BLOCKED_OUTPUT, error="hallucinated_tool")
+            elif call["verdict"] == "block":
                 res = ToolResult(False, BLOCKED_OUTPUT, error="loop_detected")
             else:
                 res = run_tool(call["name"], call["args"], cur["passages"],

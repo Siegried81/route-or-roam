@@ -119,6 +119,19 @@ def parse_response(data: dict) -> ChatResponse:
     )
 
 
+def _parse_or_raise(body) -> ChatResponse:
+    """parse_response, with a body of the wrong shape reported as LLMError.
+
+    The graphs record an LLMError in the run's `error` and keep the budget spent
+    so far; any other exception would reset the run to its initial state and
+    show zero calls and tokens for work that was actually paid for.
+    """
+    try:
+        return parse_response(body)
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise LLMError(f"malformed reply ({type(exc).__name__}: {exc})") from exc
+
+
 class ChatLLM:
     """Chat client for an OpenAI-compatible endpoint (Groq or Ollama).
 
@@ -171,15 +184,22 @@ class ChatLLM:
             payload["response_format"] = {"type": "json_object"}
         cached = self._cache_get(payload)
         if cached is not None:
-            return parse_response(cached)
+            try:
+                return parse_response(cached)
+            except (KeyError, IndexError, TypeError, ValueError):
+                pass  # a broken cache entry is a miss
         original, corrected = payload, False
         while True:
             try:
                 body = self._post(payload)
+                reply = _parse_or_raise(body)
                 # Keyed on the request as asked, so a corrected retry still
-                # serves the next identical request from the cache.
-                self._cache_put(original, body)
-                return parse_response(body)
+                # serves the next identical request from the cache. An empty
+                # reply is returned (the run handles it like any bad answer)
+                # but never cached, so a rerun asks the model again.
+                if reply.content.strip() or reply.tool_calls:
+                    self._cache_put(original, body)
+                return reply
             except LLMError as exc:
                 text = str(exc)
                 if corrected or isinstance(exc, TransientLLMError) or "HTTP 400" not in text:
@@ -249,7 +269,10 @@ class ChatLLM:
                 raise TransientLLMError(f"server error {resp.status_code}")
             if resp.status_code >= 400:
                 raise LLMError(f"HTTP {resp.status_code}: {resp.text[:300]}")
-            return resp.json()
+            try:
+                return resp.json()
+            except ValueError as exc:
+                raise LLMError(f"reply is not JSON: {resp.text[:120]!r}") from exc
         raise TransientLLMError("rate-limited on every configured key (429)",
                                 retry_after=min(waits) if waits else None)
 

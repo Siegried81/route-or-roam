@@ -6,7 +6,7 @@ Thin HTTP layer: running the systems lives in api/service.py, results shaping in
 api/results.py, and both reuse rr/ and eval/ instead of re-implementing them.
 Endpoints are plain `def`, so FastAPI runs each (slow, blocking) model run in its
 worker thread pool instead of blocking the event loop. Port 8001 leaves 8000 to
-grounded-rag's own API. When web/dist exists (after `npm run build`), the built
+dreamjob and 8002 to grounded-rag's own API. When web/dist exists (after `npm run build`), the built
 UI is served from `/` so one process is enough in production.
 """
 
@@ -56,6 +56,17 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _groq_keys_available() -> bool:
+    """True if ChatLLM will find a Groq key: our own, or grounded-rag's key ring it falls back to."""
+    if settings.GROQ_API_KEYS:
+        return True
+    try:
+        from rr.grounded import gr_config  # noqa: PLC0415 - same fallback as rr.llm.ChatLLM
+    except Exception:
+        return False
+    return bool(getattr(gr_config, "GROQ_API_KEYS", None))
+
+
 @app.get("/api/config")
 def config() -> dict:
     """Model, budgets and tool allowlist the UI displays; key presence is a boolean only."""
@@ -63,7 +74,7 @@ def config() -> dict:
     return {
         "provider": settings.LLM_PROVIDER,
         "model": settings.GROQ_MODEL if groq else settings.OLLAMA_MODEL,
-        "key_available": bool(settings.GROQ_API_KEYS) if groq else True,
+        "key_available": _groq_keys_available() if groq else True,
         "budget": {"max_steps": settings.MAX_STEPS, "max_tokens": settings.MAX_TOKENS},
         "tools": [{"name": n, "description": s.description, "needs_approval": s.needs_approval}
                   for n, s in TOOLS.items()],
@@ -99,6 +110,8 @@ def approve(req: ApproveRequest) -> dict:
         result = service.resume_agent(req.thread_id, req.approve)
     except service.UnknownThread:
         raise HTTPException(404, "no paused run with this thread_id") from None
+    except service.Busy:
+        raise HTTPException(409, "this run is already being resumed") from None
     return {"status": result["status"], "results": {"agent": result}}
 
 
@@ -126,7 +139,10 @@ def get_results(run: str = Query(..., min_length=1, max_length=200)) -> dict:
         raise HTTPException(400, "run must be a plain *.jsonl file name")
     if not path.is_file():
         raise HTTPException(404, f"run {run} not found")
-    return results.results_payload(path, load_questions(QUESTIONS_PATH))
+    try:
+        return results.results_payload(path, load_questions(QUESTIONS_PATH))
+    except (KeyError, TypeError, AttributeError):  # valid JSON lines that are not run records
+        raise HTTPException(422, f"run {run} is not a valid runs file") from None
 
 
 if WEB_DIST.is_dir():

@@ -78,6 +78,20 @@ def test_number_scale_and_sign_tolerance():
     assert number_matches(166000, 166)        # "166 thousand"
 
 
+def test_small_facts_are_not_matched_through_a_unit_scale():
+    assert not number_matches(16, 16000)      # "16 months" is not "16,000"
+    assert not number_matches(14, 0.014)
+    assert number_matches(16, 16) and number_matches(590, 590)
+
+
+def test_nu03_percentage_accepts_both_roundings_but_not_the_next_decimal():
+    nu03 = next(json.loads(l) for l in QUESTIONS.read_text(encoding="utf-8").splitlines()
+                if json.loads(l)["id"] == "nu03")
+    pct = nu03["key_facts"][1]
+    assert all(number_matches(pct, v) for v in (3.8, 3.85, 3.846))
+    assert not any(number_matches(pct, v) for v in (3.9, 4.0, 3.7))
+
+
 def test_fact_matched_alternatives_and_numbers():
     assert fact_matched("2 decembre 2027|december 2 2027", "From December 2, 2027.")
     assert fact_matched("2 decembre 2027|december 2 2027", "à partir du 2 décembre 2027")

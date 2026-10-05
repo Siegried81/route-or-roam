@@ -97,7 +97,10 @@ export default function BarChart({ data }) {
               <span className="legend-swatch" style={{ background: hover.s.color }} />{hover.s.label}
               <strong> {fmt.pct(hover.st.mean)}</strong>
             </div>
-            <div className="muted">± {fmt.pct(hover.st.spread || 0)} over {hover.st.repeats} repeat(s)</div>
+            <div className="muted">
+              {fmt.spread(hover.st.spread)} over {hover.st.repeats} repeat(s),
+              n={data.systems[hover.s.id].n_by_type?.[hover.t]}
+            </div>
           </div>
         )}
       </div>

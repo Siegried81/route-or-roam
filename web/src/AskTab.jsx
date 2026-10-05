@@ -16,10 +16,14 @@ export default function AskTab({ config }) {
   const [injected, setInjected] = useState("");
   const [showInjected, setShowInjected] = useState(false);
   const [system, setSystem] = useState("both");
-  const [running, setRunning] = useState(null); // list of systems in flight
+  const [running, setRunning] = useState(null); // systems of the current run, in order
+  const [current, setCurrent] = useState(null); // the one being answered right now
+  const [asked, setAsked] = useState("");       // the question the shown results answer
   const [results, setResults] = useState({});
   const [error, setError] = useState(null);
   const [deciding, setDeciding] = useState(false);
+  const [approvalError, setApprovalError] = useState(null);
+  const [status, setStatus] = useState("");     // one short line for screen readers
 
   useEffect(() => {
     api("/api/questions").then(setQuestions).catch(() => setQuestions([]));
@@ -40,6 +44,9 @@ export default function AskTab({ config }) {
     setShowInjected(Boolean(q.injected_passage));
   };
 
+  // "Both" is sent as two requests, workflow then agent, so each column fills in as
+  // soon as its system finishes instead of after both. The server also runs "both"
+  // one system after the other, so timing semantics are the same either way.
   const run = async (e) => {
     e.preventDefault();
     if (!question.trim() || running) return;
@@ -47,29 +54,48 @@ export default function AskTab({ config }) {
     setRunning(systems);
     setError(null);
     setResults({});
-    try {
-      const body = { system, question };
-      if (injected.trim() && showInjected) body.injected_passage = injected;
-      const picked = questions.find((x) => x.id === qid);
-      if (picked && picked.question === question) body.qid = qid;
-      const data = await api("/api/ask", body);
-      setResults(data.results);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setRunning(null);
+    setAsked(question.trim());
+    const body = { question };
+    if (injected.trim() && showInjected) body.injected_passage = injected;
+    const picked = questions.find((x) => x.id === qid);
+    if (picked && picked.question === question) body.qid = qid;
+    for (const s of systems) {
+      setCurrent(s);
+      setStatus(`Running the ${s}…`);
+      try {
+        const data = await api("/api/ask", { ...body, system: s });
+        const res = data.results[s];
+        setResults((r) => ({ ...r, [s]: res }));
+        setStatus(res.status === "awaiting_approval"
+          ? "The agent is waiting for your approval."
+          : `${s} done in ${res.record.latency_s.toFixed(1)} seconds.`);
+      } catch (err) {
+        setError(`${s}: ${err.message}`);
+        setStatus(`${s} failed.`);
+      }
     }
+    setCurrent(null);
+    setRunning(null);
   };
 
+  // Only a 404 means the run is gone; any other failure (network, 500, 409) leaves it
+  // paused on the server, so the dialog stays open and the decision can be retried.
   const decide = async (approve) => {
     const agent = results.agent;
     setDeciding(true);
+    setApprovalError(null);
     try {
       const data = await api("/api/approve", { thread_id: agent.thread_id, approve });
       setResults((r) => ({ ...r, agent: data.results.agent }));
+      setStatus(approve ? "Report approved; the agent resumed." : "Report rejected; the agent resumed.");
     } catch (err) {
-      setError(err.message);
-      setResults((r) => ({ ...r, agent: { ...r.agent, status: "done" } }));
+      if (err.status === 404) {
+        setError(`Agent: ${err.message}`);
+        setResults((r) => ({ ...r, agent: { ...r.agent, status: "done" } }));
+      } else {
+        setApprovalError(err.status === 409 ? "This decision is already being applied. Wait a moment."
+          : `${err.message}. The run is still paused: you can try again.`);
+      }
     } finally {
       setDeciding(false);
     }
@@ -147,18 +173,23 @@ export default function AskTab({ config }) {
       </form>
 
       {error && <div className="alert" role="alert">{error}</div>}
+      <p className="sr-only" role="status" aria-live="polite">{status}</p>
 
       {columns.length > 0 && (
-        <div className={`columns n${columns.length}`} aria-live="polite" aria-busy={Boolean(running)}>
-          {columns.map((s) => (
-            <RunColumn key={s} system={s} result={results[s]} loading={Boolean(running)}
-              budget={config && config.budget} />
-          ))}
-        </div>
+        <>
+          <p className="asked"><span className="muted">Question</span> {asked}</p>
+          <div className={`columns n${columns.length}`} aria-busy={Boolean(running)}>
+            {columns.map((s) => (
+              <RunColumn key={s} system={s} result={results[s]}
+                state={s === current ? "running" : running ? "queued" : "idle"}
+                budget={config && config.budget} />
+            ))}
+          </div>
+        </>
       )}
 
       {pendingAgent && (
-        <ApprovalModal pending={pendingAgent.pending} busy={deciding}
+        <ApprovalModal pending={pendingAgent.pending} busy={deciding} error={approvalError}
           onApprove={() => decide(true)} onReject={() => decide(false)} />
       )}
     </div>

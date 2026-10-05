@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmt, SYSTEM_LABEL } from "./api.js";
 import BarChart from "./components/BarChart.jsx";
 
 // "better" marks which direction wins, so the better of the two cells can be bolded.
 const KPIS = [
   { key: "overall", label: "Overall success", get: (s) => s.overall.mean,
-    show: (s) => `${fmt.pct(s.overall.mean)} ± ${fmt.pct(s.overall.spread || 0)}`, better: "high" },
+    show: (s) => `${fmt.pct(s.overall.mean)} ${fmt.spread(s.overall.spread)} (${s.passed}/${s.n})`, better: "high" },
+  // Not ranked: an interval is context for the rate above, not a score to win.
+  { key: "ci", label: "95% interval (Wilson)", get: () => null, show: (s) => fmt.ci(s.wilson) },
   { key: "llm_calls", label: "Avg LLM calls", get: (s) => s.llm_calls, show: (s) => fmt.num(s.llm_calls, 2), better: "low" },
   { key: "tokens", label: "Avg tokens (in + out)", get: (s) => s.tokens, show: (s) => fmt.int(s.tokens), better: "low" },
   { key: "p50", label: "Latency p50", get: (s) => s.p50_latency, show: (s) => fmt.sec(s.p50_latency), better: "low" },
@@ -17,29 +19,38 @@ const KPIS = [
 ];
 const ORDER = ["workflow", "agent"];
 
-export default function ResultsTab() {
+// On a phone the 720-wide chart shrinks its labels to ~6px, so the table is the default there.
+const narrow = () => typeof window !== "undefined" && window.matchMedia?.("(max-width: 600px)").matches;
+
+export default function ResultsTab({ active = true }) {
   const [runs, setRuns] = useState([]);
   const [run, setRun] = useState("");
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [asTable, setAsTable] = useState(false);
+  const [asTable, setAsTable] = useState(narrow);
+  const latest = useRef(0);
 
+  // Re-list runs whenever the tab is shown, so a run written meanwhile appears.
   useEffect(() => {
+    if (!active) return;
     api("/api/runs").then((rs) => {
       setRuns(rs);
       if (rs.length) setRun((cur) => cur || rs[0].name);
     }).catch((e) => setError(e.message));
-  }, []);
+  }, [active]);
 
+  // Only the newest request may set the data: switching runs quickly must not let
+  // an older, slower response overwrite the run that is now selected.
   const load = useCallback(() => {
     if (!run) return;
+    const ticket = ++latest.current;
     setLoading(true);
     setError(null);
     api(`/api/results?run=${encodeURIComponent(run)}`)
-      .then(setData)
-      .catch((e) => { setError(e.message); setData(null); })
-      .finally(() => setLoading(false));
+      .then((d) => { if (ticket === latest.current) setData(d); })
+      .catch((e) => { if (ticket === latest.current) { setError(e.message); setData(null); } })
+      .finally(() => { if (ticket === latest.current) setLoading(false); });
   }, [run]);
 
   useEffect(() => { load(); }, [load]);
@@ -68,9 +79,19 @@ export default function ResultsTab() {
 
       {error && <div className="alert" role="alert">{error}</div>}
 
+      {!error && runs.length === 0 && (
+        <p className="card hint">
+          No evaluation run yet. Create one with <code>python -m eval.run_compare --run-id r1 --repeats 3</code>
+          {" "}(add <code>--estimate</code> first to see its worst-case cost), then press Refresh.
+        </p>
+      )}
+
       {data && (
         <>
-          <p className="takeaway card" aria-live="polite">{data.takeaway}</p>
+          <div className="takeaway card" aria-live="polite">
+            <p>{data.takeaway}</p>
+            {data.paired_sentence && <p className="hint">{data.paired_sentence}</p>}
+          </div>
 
           <section className="card">
             <div className="section-head">
@@ -121,8 +142,10 @@ export default function ResultsTab() {
                 </table>
               </div>
               <p className="hint">
-                Bold = better of the two. Success: every key fact present (numbers ±1%), cited when answering,
-                refusal exactly when expected, no forbidden string (eval/score.py).
+                Bold = the better of the two values, which is not by itself a significant difference
+                (see the paired test above). Success: every key fact present (numbers ±1%), cited when
+                answering, refusal exactly when expected, no forbidden string (eval/score.py).
+                "± n/a" = a single repeat, so no run-to-run spread is observable.
               </p>
             </section>
 
@@ -173,7 +196,8 @@ function TypeTable({ data, systems }) {
               <th scope="row">{t.replace("_", " ")}</th>
               {systems.map((s) => {
                 const st = data.systems[s].by_type[t];
-                return <td key={s}>{st ? `${fmt.pct(st.mean)} ± ${fmt.pct(st.spread || 0)}` : "n/a"}</td>;
+                const n = data.systems[s].n_by_type?.[t];
+                return <td key={s}>{st ? `${fmt.pct(st.mean)} ${fmt.spread(st.spread)} (n=${n})` : "n/a"}</td>;
               })}
             </tr>
           ))}
