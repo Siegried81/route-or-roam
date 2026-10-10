@@ -3,6 +3,8 @@
 reports/
 runs/
 *.sqlite
+# A grounded-rag checkout downloaded by rr/checkout.py (RR_FETCH_GROUNDED_RAG=1).
+.grounded-rag/
 __pycache__/
 *.pyc
 .pytest_cache/

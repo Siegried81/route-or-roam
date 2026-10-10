@@ -17,7 +17,22 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 # grounded-rag is reused in place (imported, never copied); see rr/grounded.py.
-GROUNDED_RAG_PATH = Path(os.getenv("GROUNDED_RAG_PATH", str(ROOT.parent / "grounded-rag"))).resolve()
+# A relative path counts from this repository's root, so one .env works from
+# any working directory (an absolute path is kept as is).
+GROUNDED_RAG_PATH = (ROOT / os.getenv("GROUNDED_RAG_PATH", "../grounded-rag")).resolve()
+# Where a missing checkout comes from when RR_FETCH_GROUNDED_RAG=1: the GitHub
+# archive of a branch, tag or commit sha. A platform that clones only this
+# repository (Streamlit Community Cloud) has no sibling folder and no git
+# step, so rr/grounded.py downloads and unpacks it on first import. Off by
+# default: on a workstation a wrong path is an error to see, not a download.
+FETCH_GROUNDED_RAG = os.getenv("RR_FETCH_GROUNDED_RAG", "0") == "1"
+GROUNDED_RAG_REPO = os.getenv("GROUNDED_RAG_REPO", "https://github.com/Siegried81/grounded-rag")
+GROUNDED_RAG_REF = os.getenv("GROUNDED_RAG_REF", "main")
+# Build a corpus index on first use when it is missing. Same switch as
+# docker/entrypoint.sh, which does it before the API starts; here it covers
+# the Streamlit app, which has no entrypoint before it. Off by default for
+# the same reason as the fetch: a missing index should be seen, not billed.
+INGEST_ON_START = os.getenv("RR_INGEST_ON_START", "0") == "1"
 
 REPORTS_DIR = ROOT / "reports"
 RUNS_DIR = ROOT / "runs"
