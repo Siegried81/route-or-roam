@@ -1,0 +1,34 @@
+# Render blueprint: the API with the built UI, as one Docker web service.
+#
+# Render has no persistent disk on the free plan and no Ollama, so the
+# indexes are built at start (RR_INGEST_ON_START=1) with a hosted embedder:
+# set HOSTED_EMBED_BASE_URL / HOSTED_EMBED_MODEL / HOSTED_EMBED_API_KEY to an
+# OpenAI-compatible embeddings endpoint, plus GROQ_API_KEY for generation, in
+# the Render dashboard (sync: false keeps them out of this file). The first
+# start takes a few minutes while both corpora are embedded.
+#
+# Not exercised from this repository's CI: a deploy is the test.
+services:
+  - type: web
+    name: route-or-roam
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: RR_INGEST_ON_START
+        value: "1"
+      - key: EMBED_PROVIDER
+        value: hosted
+      - key: RR_LLM_PROVIDER
+        value: groq
+      - key: HOSTED_EMBED_BASE_URL
+        sync: false
+      - key: HOSTED_EMBED_MODEL
+        sync: false
+      - key: HOSTED_EMBED_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: RR_APPROVE_TOKEN
+        generateValue: true

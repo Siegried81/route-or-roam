@@ -1,0 +1,22 @@
+# Secrets, local environments and generated state stay out of the image.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+reports/
+runs/
+*.sqlite
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.git/
+.github/
+docs/
+tests/
+# Built in the image's own Node stage.
+web/node_modules/
+web/dist/
+Dockerfile
+docker-compose.yml
+.dockerignore

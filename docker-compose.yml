@@ -1,0 +1,67 @@
+# route-or-roam in Docker: the API with the built React UI on :8001.
+#
+#   docker compose up --build                                  # API + UI, needs indexes (see below)
+#   docker compose --profile local-llm up -d ollama            # bundled embedder/LLM
+#   docker compose --profile local-llm exec ollama ollama pull nomic-embed-text
+#   docker compose --profile tools --profile local-llm run --rm ingest   # build both indexes, once
+#
+# grounded-rag lives inside the image (cloned at build time, see Dockerfile);
+# its indexes live in the `rag_index` volume so they survive rebuilds and are
+# shared by the `ingest` one-shot and the API. Secrets come from .env on the
+# host and are never baked in.
+#
+# Build against a specific grounded-rag commit:
+#   docker compose build --build-arg GROUNDED_RAG_REF=<sha or branch>
+
+x-common: &common
+  build:
+    context: .
+  image: route-or-roam:latest
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    GROUNDED_RAG_PATH: /opt/grounded-rag
+    # Inside the network the embedder is the sibling service, not localhost.
+    OLLAMA_URL: http://ollama:11434
+    RR_OLLAMA_BASE_URL: http://ollama:11434/v1
+  volumes:
+    - rag_index:/opt/grounded-rag/index
+    - ./reports:/app/reports
+    - ./runs:/app/runs
+
+services:
+  api:
+    <<: *common
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+        required: false
+
+  # One-shot: build grounded-rag's indexes into the shared volume. Arguments
+  # after the service name are appended, e.g. `run --rm ingest --corpus filings_sections`.
+  ingest:
+    <<: *common
+    profiles: ["tools"]
+    working_dir: /opt/grounded-rag
+    entrypoint: ["sh", "-c", "python cli.py ingest --corpus ai_act_sections && python cli.py ingest --corpus filings_sections"]
+    restart: "no"
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  rag_index:
+  ollama_models:

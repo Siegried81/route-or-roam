@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { approveToken } from "../api";
 
 // Human-in-the-loop gate for save_report: the agent run is paused server-side
 // (LangGraph interrupt) until one of these buttons resumes it.
@@ -9,6 +10,10 @@ import { useEffect, useRef } from "react";
 export default function ApprovalModal({ pending, busy, error, onApprove, onReject }) {
   const rejectRef = useRef(null);
   const dialogRef = useRef(null);
+  // Shown only once the server has asked for it (a 401 on approve): a local
+  // run never needs a token, and a field nobody needs is a field people fill.
+  const [token, setToken] = useState(approveToken.get());
+  const needsToken = Boolean(error && /token/i.test(error)) || Boolean(token);
 
   useEffect(() => {
     const previous = document.activeElement;
@@ -52,6 +57,13 @@ export default function ApprovalModal({ pending, busy, error, onApprove, onRejec
           {args.markdown || JSON.stringify(args, null, 2)}
         </pre>
         {error && <div className="alert" role="alert">{error}</div>}
+        {needsToken && (
+          <div className="field">
+            <label htmlFor="approve-token">Approval token (this server requires one)</label>
+            <input id="approve-token" type="password" value={token} autoComplete="off"
+              onChange={(e) => { setToken(e.target.value); approveToken.set(e.target.value); }} />
+          </div>
+        )}
         <div className="modal-actions">
           <button ref={rejectRef} className="secondary" disabled={busy} onClick={onReject}>Reject</button>
           <button className="primary" disabled={busy} onClick={onApprove}>{busy ? "Resuming…" : "Approve"}</button>
