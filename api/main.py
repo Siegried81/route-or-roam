@@ -15,7 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+import secrets
+
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -29,7 +31,29 @@ WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 app = FastAPI(title="route-or-roam API", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5181", "http://127.0.0.1:5181"],
-                   allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
+                   allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Approve-Token"])
+
+# Hosts a request may come from and still count as "this machine". Starlette's
+# TestClient reports "testclient", which is the suite running on this machine.
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+
+
+def _approver(request: Request, token: Optional[str]) -> str:
+    """Who is approving, or an HTTP error. See settings.APPROVE_TOKEN.
+
+    With a token configured, the header has to match it (constant-time, so a
+    guess cannot be timed). Without one, the API is a local tool and only this
+    machine may approve: an API started with `--host 0.0.0.0` and no token would
+    otherwise let anyone on the network write a report in your name.
+    """
+    if settings.APPROVE_TOKEN:
+        if not token or not secrets.compare_digest(token, settings.APPROVE_TOKEN):
+            raise HTTPException(401, "approval needs a valid X-Approve-Token header")
+        return "token"
+    host = request.client.host if request.client else ""
+    if host not in _LOCAL_HOSTS:
+        raise HTTPException(403, "approval from another machine needs RR_APPROVE_TOKEN to be set")
+    return f"local:{host}"
 
 
 class AskRequest(BaseModel):
@@ -104,15 +128,24 @@ def ask(req: AskRequest) -> dict:
 
 
 @app.post("/api/approve")
-def approve(req: ApproveRequest) -> dict:
-    """Resume a paused agent run with the decision and return its (final or next) state."""
+def approve(
+    req: ApproveRequest,
+    request: Request,
+    x_approve_token: Optional[str] = Header(default=None, alias="X-Approve-Token"),
+) -> dict:
+    """Resume a paused agent run with the decision and return its (final or next) state.
+
+    The decision is the one write this API performs, so it is the one call that
+    checks who makes it (`_approver`) and says so in the response.
+    """
+    decided_by = _approver(request, x_approve_token)
     try:
         result = service.resume_agent(req.thread_id, req.approve)
     except service.UnknownThread:
         raise HTTPException(404, "no paused run with this thread_id") from None
     except service.Busy:
         raise HTTPException(409, "this run is already being resumed") from None
-    return {"status": result["status"], "results": {"agent": result}}
+    return {"status": result["status"], "decided_by": decided_by, "results": {"agent": result}}
 
 
 @app.get("/api/questions")

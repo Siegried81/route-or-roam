@@ -40,6 +40,12 @@ LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
 LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "route-or-roam")
 
 # --- LLM ---------------------------------------------------------------------
+# Who may approve a paused agent run through the API. Empty (the default) means
+# the API is a local tool: only requests from this machine may approve. Set it
+# before exposing the API beyond localhost; the UI then has to send it in the
+# X-Approve-Token header. An approval is the one action here that writes a
+# file, so it is the one that needs to know who clicked.
+APPROVE_TOKEN = os.getenv("RR_APPROVE_TOKEN", "")
 LLM_PROVIDER = os.getenv("RR_LLM_PROVIDER", "groq")  # groq | ollama
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_MODEL = os.getenv("RR_GROQ_MODEL", "openai/gpt-oss-20b")
