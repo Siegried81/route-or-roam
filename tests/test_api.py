@@ -296,3 +296,43 @@ def test_results_bad_run_names(client, runs_dir, run, code):
 
 def test_results_requires_run(client):
     assert client.get("/api/results").status_code == 422
+
+
+# --- who may approve ------------------------------------------------------------
+#
+# Approval is the one write the API performs. Without RR_APPROVE_TOKEN the API is
+# a local tool and only this machine may approve; with it, the header decides.
+
+
+def _paused_run(client, monkeypatch):
+    script_llm(monkeypatch, [tool_reply(SEARCH), tool_reply(SAVE), GOOD])
+    return client.post("/api/ask", json={"system": "agent", "question": "Save a report"}).json()["results"]["agent"]
+
+
+def test_without_a_token_a_local_approval_is_recorded_as_local(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(main.settings, "APPROVE_TOKEN", "")
+    ag = _paused_run(client, monkeypatch)
+    done = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True}).json()
+    assert done["decided_by"].startswith("local:")
+
+
+def test_without_a_token_another_machine_may_not_approve(monkeypatch, tmp_path):
+    monkeypatch.setattr(main.settings, "APPROVE_TOKEN", "")
+    remote = TestClient(main.app, client=("203.0.113.5", 40000))
+    ag = _paused_run(remote, monkeypatch)
+    denied = remote.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True})
+    assert denied.status_code == 403
+    assert "RR_APPROVE_TOKEN" in denied.json()["detail"]
+
+
+def test_with_a_token_the_header_decides(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(main.settings, "APPROVE_TOKEN", "s3cret")
+    ag = _paused_run(client, monkeypatch)
+    missing = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True})
+    assert missing.status_code == 401
+    wrong = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True},
+                        headers={"X-Approve-Token": "nope"})
+    assert wrong.status_code == 401
+    done = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True},
+                       headers={"X-Approve-Token": "s3cret"}).json()
+    assert done["decided_by"] == "token" and done["status"] == "done"

@@ -94,6 +94,10 @@ see [what the numbers don't say](docs/technical_deep_dive.md#10-what-the-numbers
 - **Human approval** (`rr/agent.py`): `save_report` pauses on `interrupt()`;
   state is checkpointed in SQLite, so the resume can come from another request
   (a second resume of the same run gets 409). No approver means reject.
+  Over the API, `POST /api/approve` is the one call that writes a file, so it
+  is the one that checks who calls it: with `RR_APPROVE_TOKEN` unset only this
+  machine may approve (403 otherwise); set, the `X-Approve-Token` header has
+  to match (401 otherwise). The response says `decided_by`.
 - **Untrusted-source fence** (`rr/fence.py`): passages wrapped in
   `<untrusted_source id=S#>`, forged tags escaped, injection phrases flagged.
 - **Budget** (`rr/budget.py`): 8 LLM calls and 12,000 tokens per run, the same
