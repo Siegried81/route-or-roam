@@ -13,9 +13,22 @@ from functools import lru_cache
 
 from rr import settings
 
-if not (settings.GROUNDED_RAG_PATH / "rag" / "retrieve.py").is_file():
+def _checkout_present() -> bool:
+    """A grounded-rag checkout is one that carries its retrieval module."""
+    return (settings.GROUNDED_RAG_PATH / "rag" / "retrieve.py").is_file()
+
+
+# No checkout and permission to fetch one: download the archive once (a
+# platform that clones only this repository). Otherwise a missing checkout is
+# a configuration error, reported with the path that was looked at.
+if not _checkout_present() and settings.FETCH_GROUNDED_RAG:
+    from rr.checkout import fetch_checkout
+
+    fetch_checkout(settings.GROUNDED_RAG_PATH, settings.GROUNDED_RAG_REPO, settings.GROUNDED_RAG_REF)
+if not _checkout_present():
     raise ImportError(
-        f"grounded-rag not found at {settings.GROUNDED_RAG_PATH}; set GROUNDED_RAG_PATH."
+        f"grounded-rag not found at {settings.GROUNDED_RAG_PATH}; set GROUNDED_RAG_PATH "
+        "(or RR_FETCH_GROUNDED_RAG=1 to download it)."
     )
 if str(settings.GROUNDED_RAG_PATH) not in sys.path:
     sys.path.insert(0, str(settings.GROUNDED_RAG_PATH))
@@ -51,6 +64,12 @@ def _load(corpus: str):
     from rag.lexical import BM25Index
     from rag.store import VectorStore
 
+    if settings.INGEST_ON_START:
+        # grounded-rag builds the index only when its files are missing, with
+        # the embedder it is configured with, so a present index costs nothing.
+        from rag.ingest import ensure_index
+
+        ensure_index(corpus)
     store = VectorStore.load(gr_config.index_path(corpus))
     try:
         bm25 = BM25Index.load(gr_config.bm25_path(corpus))

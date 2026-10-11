@@ -7,6 +7,7 @@ venv/
 reports/
 runs/
 *.sqlite
+.grounded-rag/
 **/__pycache__/
 **/*.pyc
 .pytest_cache/
