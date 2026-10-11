@@ -37,3 +37,37 @@ One dated entry per change that alters what the system promises. Append, never r
   acceptable for two small corpora, not for a large one.
 - **Revisit if:** grounded-rag gains a `pyproject.toml` and ships its corpora
   as package data — the clone then becomes a pip install at a version.
+
+## 2026-10-11 — Eval set relabelled against the full AI Act
+
+- **What:** grounded-rag replaced its four-file French AI Act primer with the
+  full Regulation (EU) 2024/1689 in English (309 files: recitals, articles,
+  annexes). The 15 questions that touch the AI Act were relabelled against it
+  (`eval/questions.jsonl`):
+  - label only, same expected answer: sh07, sh09, mh07, cc01, cc03, cc04, cc06;
+  - Annex III date, mh08, cc02, in03: 2 December 2027 becomes **2 August 2026**.
+    The later date came from the proposed Digital Omnibus, which is not in the
+    corpus; the regulation applies from 2 August 2026 and defers only Article
+    6(1) to 2 August 2027. mh08 also drops "explainability", named only in a
+    recital;
+  - sh10 (why the Annex III obligations were postponed) is now **unanswerable**:
+    nothing in the regulation mentions a postponement;
+  - mh09 and cc05 lose their "16 months" half and ask instead for the date the
+    GPAI obligations apply (2 August 2025) and the date prohibited practices
+    were banned (2 February 2025);
+  - sh08 asks for the two most tightly regulated categories (prohibited,
+    high-risk): "limited" and "minimal risk" are commentary, not the text;
+  - un03 (maximum fine) is now **answerable**: Article 99 gives EUR 35 000 000
+    or 7 % of turnover, so its forbidden strings are gone.
+  Type counts are unchanged (sh10 and un03 swap single_hop and unanswerable).
+- **Why:** every AI Act gold source pointed at a file that no longer exists,
+  so source recall read 0 and `test_string_facts_appear_in_gold_sources`
+  failed against grounded-rag main. Keeping the old labels would have scored
+  correct answers from the real regulation as wrong.
+- **What it changes in the numbers:** pass rates, source recall and refusal
+  counts measured before this date are **not comparable** with runs after it
+  (`docs/results.md` predates it). The questions are still asked in French
+  against an English corpus for the AI Act part.
+- **How to catch the next drift:** `python -m eval.locate_gold` lists every
+  gold source missing from the grounded-rag checkout and where its facts now
+  live; it exits 1 while any is missing. It reports, it never relabels.

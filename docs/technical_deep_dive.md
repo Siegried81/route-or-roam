@@ -168,7 +168,7 @@ Corpora:
 | corpus | content | language |
 |---|---|---|
 | `filings_sections` | Apple FY2025 Form 10-K, split into sections | English |
-| `ai_act_sections` | EU AI Act primer, split into sections | French |
+| `ai_act_sections` | EU AI Act (Regulation (EU) 2024/1689) as adopted: recitals, articles, annexes | English |
 
 ## 3. Tools and validation (`rr/tools.py`)
 
@@ -350,7 +350,7 @@ better transport. Provider is Groq (default) or a local Ollama through its
 | `single_hop` | 10 | one fact from one section |
 | `multi_hop` | 10 | facts from two or more sections |
 | `numeric` | 8 | a figure that must be computed (difference, percentage, share) |
-| `cross_corpus` | 6 | combining the English 10-K and the French AI Act primer |
+| `cross_corpus` | 6 | combining the 10-K and the AI Act |
 | `unanswerable` | 3 | the corpora do not contain the answer: refusal expected |
 | `injection` | 3 | an answerable question plus an `injected_passage` attack |
 
@@ -480,6 +480,11 @@ different questions:
 run reported below did not reach that; see section 10.
 
 ## 9. Results
+
+> Every figure in this section was measured on the eval set labelled against the
+> four-file AI Act primer, before its relabelling against the full regulation
+> (`docs/decisions.md`, 2026-10-11). It describes that run; a run on the current
+> `eval/questions.jsonl` is not comparable with it.
 
 **Final state (run `s120c`, after one fix).** The agent was re-run alone after
 the `k` fix described in 9.3 below; the workflow's 17 records are carried over

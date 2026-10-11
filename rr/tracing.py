@@ -17,7 +17,7 @@ missing provider.
 
 **The cost, which belongs in the README rather than a footnote.** Traces go to
 LangChain's servers, so questions, retrieved passages and model outputs leave the
-machine. The corpora here are a public Apple 10-K and an EU AI Act primer, so that
+machine. The corpora here are a public Apple 10-K and the published EU AI Act, so that
 is acceptable - but it would not be on a private corpus, and the evaluation
 questions are the project's own work. Turn it on deliberately, not by default.
 """
