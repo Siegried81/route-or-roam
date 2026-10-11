@@ -3,7 +3,7 @@
 **Same questions, same tools, same model: when is an agent worth it?**
 
 Route or Roam answers grounded questions over two document collections (Apple's
-FY2025 10-K in English, an EU AI Act primer in French) in two ways, and measures
+FY2025 10-K and the full text of the EU AI Act, both in English) in two ways, and measures
 the difference:
 
 - **System A, workflow** (`rr/workflow.py`): code fixes the route. The model

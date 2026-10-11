@@ -42,7 +42,7 @@ CHECKPOINT_DB = RUNS_DIR / "checkpoints.sqlite"
 CORPORA = ("filings_sections", "ai_act_sections")
 CORPUS_DESCRIPTIONS = {
     "filings_sections": "Apple FY2025 Form 10-K, split into sections (English).",
-    "ai_act_sections": "EU AI Act primer, split into sections (French).",
+    "ai_act_sections": "EU AI Act, Regulation (EU) 2024/1689 as adopted, split into recitals, articles and annexes (English).",
 }
 
 # --- Tracing (LangSmith, optional) -------------------------------------------

@@ -1,5 +1,7 @@
 # Results: `s120c.jsonl`
 
+> Measured on the eval set labelled against the four-file AI Act primer. The set was relabelled against the full regulation on 2026-10-11 (`docs/decisions.md`): these figures are not comparable with a run on the current `eval/questions.jsonl`.
+
 Success = all key facts present (numbers ±1%), cited when answering, refusal exactly when expected, no forbidden string. Full definition: `eval/score.py`. Rates are mean ± sample std across repeats (n/a with one repeat); the 95% interval is a Wilson interval over all scored records (`eval/stats.py`).
 
 ## Workflow vs agent (paired)
