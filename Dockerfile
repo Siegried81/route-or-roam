@@ -30,9 +30,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     GROUNDED_RAG_PATH=/opt/grounded-rag
 
-# git only for the clone; removed in the same layer so it is not in the image.
+# git only for the checkout; removed in the same layer so it is not in the image.
+# fetch + checkout FETCH_HEAD accepts a branch, a tag or a commit sha alike.
 RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && git clone --depth 1 --branch "${GROUNDED_RAG_REF}" "${GROUNDED_RAG_REPO}" /opt/grounded-rag \
+    && git init -q /opt/grounded-rag \
+    && git -C /opt/grounded-rag fetch -q --depth 1 "${GROUNDED_RAG_REPO}" "${GROUNDED_RAG_REF}" \
+    && git -C /opt/grounded-rag checkout -q FETCH_HEAD \
     && rm -rf /opt/grounded-rag/.git \
     && apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
