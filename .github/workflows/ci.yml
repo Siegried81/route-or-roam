@@ -40,7 +40,7 @@ jobs:
           repository: Siegried81/grounded-rag
           path: grounded-rag
           ref: ${{ env.GROUNDED_RAG_REF }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
