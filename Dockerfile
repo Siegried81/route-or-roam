@@ -11,7 +11,7 @@
 # layer; the runtime image carries no compiler, no Node and no .env.
 
 # --- 1. React UI ------------------------------------------------------------
-FROM node:22-alpine AS web
+FROM node:25-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
 RUN npm ci --silent 2>/dev/null || npm install --silent
