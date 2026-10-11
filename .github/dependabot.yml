@@ -1,0 +1,38 @@
+# Dependency version updates: monthly, one grouped PR per ecosystem for minor
+# and patch releases; a major release arrives as a PR of its own, so the package
+# that breaks is named. Security updates arrive as soon as an advisory is
+# published, whatever the schedule.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      python-deps:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: monthly
+    groups:
+      web-deps:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      docker-images:
+        patterns: ["*"]
+        update-types: [minor, patch]
