@@ -4,7 +4,7 @@ langgraph-checkpoint-sqlite>=2.0
 pydantic>=2.6
 requests>=2.31
 python-dotenv>=1.0
-streamlit>=1.33
+streamlit>=1.65.0
 matplotlib>=3.8
 pytest>=8.0
 # Needed to import grounded-rag's retrieval stack (rag.store / rag.lexical).
