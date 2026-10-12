@@ -148,7 +148,10 @@ python -m eval.run_compare --run-id r1 --repeats 3              # resumable: reu
 python -m eval.report --runs runs/r1.jsonl                      # -> docs/results.md + chart
 python -m eval.run_compare --run-id p1 --questions eval/paraphrases.jsonl   # same question, three phrasings
 python -m eval.report --runs runs/p1.jsonl --questions eval/paraphrases.jsonl --out runs/p1.md
-python -m pytest -q                                             # 202 tests, offline
+python -m eval.judge --runs runs/r1.jsonl --estimate            # opt-in LLM judge: one call per record
+python -m eval.judge --runs runs/r1.jsonl                       # -> runs/r1.judge.jsonl (resumable)
+python -m eval.report --runs runs/r1.jsonl --judge runs/r1.judge.jsonl   # adds the judge rows
+python -m pytest -q                                             # 214 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`
@@ -231,7 +234,10 @@ their traces and shows an approval modal when the agent asks for `save_report`.
   refusal rule; both change what `budget_exhausted` and `refused` mean for the
   agent, so it needs a re-run before the unanswerable row is read again.
 - Latency mostly measures free-tier rate-limit waits, not the designs.
-- Scoring is string and number matching; a correct paraphrase can fail.
+- Scoring is string and number matching; a correct paraphrase can fail. The
+  opt-in LLM judge (`eval/judge.py`) flags those cases in extra report rows;
+  it has not been run on the published records, and it never changes the
+  string score.
 - The verifier is lexical; the injection scan is a regex metric, not a filter.
 
 Details: [technical deep dive](docs/technical_deep_dive.md).
