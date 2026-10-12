@@ -1,7 +1,7 @@
 # Orchestration: both systems are LangGraph graphs so the comparison is fair.
 langgraph>=0.4
 langgraph-checkpoint-sqlite>=2.0
-pydantic>=2.6
+pydantic>=2.14.0
 requests>=2.31
 python-dotenv>=1.0
 streamlit>=1.33
