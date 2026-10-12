@@ -71,3 +71,24 @@ One dated entry per change that alters what the system promises. Append, never r
 - **How to catch the next drift:** `python -m eval.locate_gold` lists every
   gold source missing from the grounded-rag checkout and where its facts now
   live; it exits 1 while any is missing. It reports, it never relabels.
+
+## 2026-10-12 — An opt-in LLM judge, reported next to the string score
+
+- **What:** `eval/judge.py` makes one structured LLM call per stored record
+  (fixed rubric, reply validated against a pydantic schema, no second call on
+  an invalid reply) and writes the verdicts to their own jsonl.
+  `eval.report --judge <file>` adds secondary rows: "success with judged
+  facts" and the records where judge and strings disagree on the facts.
+- **New number, not a changed one:** "success with judged facts" is success as
+  defined in `eval/score.py` with criterion 1 (key facts) decided by the judge
+  instead of string matching; citations, refusal, forbidden strings and errors
+  are unchanged. The reference success rate, every existing row and every
+  published figure stay as they are: without `--judge` the report is
+  byte-identical (checked on the five stored runs files).
+- **Why:** string matching rejects answers that are right in other words
+  (`missed_hop`); a judge lists them without making the reference score depend
+  on a model.
+- **What it does not settle:** the judge is itself a model and has not been run
+  on the published records, so its agreement with a human reader is unmeasured.
+- **Revisit if:** the judge is run on the full set; read the "judge yes,
+  strings no" list by eye before quoting the judged rate.

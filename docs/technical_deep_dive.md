@@ -406,6 +406,39 @@ last allowed step still passes. Source recall (gold sources actually searched)
 and tool-use accuracy (every required tool called, no hallucinated tool) are
 reported next to success but are not part of it.
 
+### 8.3.1 Optional LLM judge (`eval/judge.py`)
+
+Off unless asked for: `python -m eval.judge --runs runs/r1.jsonl` makes one
+LLM call per stored record (errored records are skipped) and writes
+`runs/r1.judge.jsonl`; `python -m eval.report ... --judge runs/r1.judge.jsonl`
+then adds rows to each system's table. Without `--judge` the report is
+byte-identical to what it was before the judge existed.
+
+- **One structured call, no loop.** A fixed rubric (`JUDGE_SYSTEM`) receives
+  the question, whether a refusal is expected, the key facts and the answer
+  fenced in `<answer>` tags as data. The reply must validate against
+  `JudgeVerdict` (`{"verdict": "correct" | "incorrect", "reason": str}`, no
+  other key). A reply that does not validate is stored as a judge error and is
+  not asked again. The only repeats are the transport ones every call has: the
+  backoff on transient provider errors, and the client's single corrected
+  request when Groq rejects the JSON it generated in JSON mode (§7).
+- **What it replaces, and what it doesn't.** The judge decides criterion 1
+  only (are the key facts conveyed, in any wording or language). "Success with
+  judged facts" keeps criteria 2 to 4 and the error rule exactly as in §8.3,
+  so it differs from the reference rate only in how a fact is recognised.
+- **Reported as a second opinion.** The rows are labelled secondary: success
+  with judged facts (with its Wilson interval and the number of judged
+  records), and the records where the two disagree on the facts in each
+  direction. "Judge yes, strings no" is the list of `missed_hop` candidates to
+  read by eye; "strings yes, judge no" is where the judge is the one to doubt.
+- **Self-describing.** Each verdict line stores the record key, the judge's
+  provider and model, and a 12-character hash of the rubric, so a verdicts
+  file says what produced it after either changes. Resuming re-sends only the
+  records without a valid verdict; the last line per key wins.
+
+The judge has not been run on the published records: its numbers do not
+appear in §9.
+
 ### 8.4 Failure tags
 
 Each failed record gets one primary tag, by priority (first match wins), plus
@@ -692,8 +725,10 @@ by construction.
 - The token budget is checked before each call, so the last call can overshoot.
 - Temperature is 0, but hosted models are not perfectly deterministic.
 - Scoring is string and number matching: an answer that is right in other
-  words (a regulation described but not named) fails as `missed_hop`.
-- Real runs need grounded-rag's indexes and embedder; the tests (211, offline,
+  words (a regulation described but not named) fails as `missed_hop`. The
+  opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
+  change it, and it is itself a model: its verdicts are a second opinion.
+- Real runs need grounded-rag's indexes and embedder; the tests (223, offline,
   scripted LLM, retrieval mocked) do not.
 
 ## 13. Roadmap
@@ -708,6 +743,5 @@ by construction.
    Ollama model, to separate design effects from model effects (the `k=10`
    failure in particular), and, if the gap is worth testing, a paired test
    across models.
-3. **LLM judge**: one structured call with a fixed rubric next to the string
-   matcher, to catch correct paraphrases that `missed_hop` rejects, reported
-   separately so the deterministic score stays the reference.
+3. **LLM judge**: built (§8.3.1, `eval/judge.py`, opt-in); what remains is to
+   run it on the full run and read the "judge yes, strings no" list.

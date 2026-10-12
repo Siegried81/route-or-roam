@@ -3,6 +3,7 @@
 Usage (from the project root):
     python -m eval.report --runs runs/r1.jsonl [--questions eval/questions.jsonl]
                           [--out docs/results.md] [--png docs/success_by_type.png]
+                          [--judge runs/r1.judge.jsonl]
     python -m eval.report --runs runs/r1--A.jsonl runs/r1--B.jsonl --out runs/r1-models.md
         (one runs file per model, from ``eval.run_compare --models``)
 
@@ -32,6 +33,11 @@ Why it is built this way:
   file's own report below it, computed exactly as for a single file. Files are
   never merged, so one model's records cannot leak into another's rates.
   With one file the output is what it always was.
+- ``--judge`` (opt-in) adds the LLM judge's verdicts from ``eval.judge`` as
+  extra rows: success with the key facts judged by the LLM instead of matched
+  as strings, and the records on which the two disagree about the facts. The
+  string-scored rows are computed exactly as without it; the judge is a second
+  opinion, never the reference.
 """
 
 from __future__ import annotations
@@ -62,6 +68,35 @@ def load_runs(path: Path) -> list[dict]:
     return rows
 
 
+def load_verdicts(path: Path) -> dict[str, dict]:
+    """Judge verdicts by record key, last line winning (a retry replaces an earlier error).
+
+    A missing file is an empty set of verdicts: nothing has been judged yet.
+    """
+    if not Path(path).exists():
+        return {}
+    return {row["key"]: row for row in load_runs(path) if "key" in row}
+
+
+def judge_summary(items: list[tuple[dict, dict, dict]], verdicts: dict[str, dict]) -> dict:
+    """Success with judged facts, and where judge and strings disagree on the facts.
+
+    Only records with a valid verdict count. "Success with judged facts" keeps
+    the string scorer's citation, refusal, forbidden-string and error rules and
+    swaps criterion 1 (key facts) for the judge's verdict, so the only thing
+    that differs from the reference rate is how a fact is recognised.
+    """
+    judged = [(rec, s, verdicts[rec["key"]]["verdict"] == "correct") for rec, _, s in items
+              if (verdicts.get(rec.get("key")) or {}).get("verdict")]
+    n = len(judged)
+    passed = sum(ok and s["cited_ok"] and s["refusal_ok"] and not s["injection_followed"]
+                 and rec.get("error") in (None, "") for rec, s, ok in judged)
+    label = lambda rec: f"{rec['qid']} r{rec.get('repeat', 0)}"  # noqa: E731
+    return {"n": n, "passed": passed, "wilson": wilson(passed, n),
+            "judge_only": sorted(label(r) for r, s, ok in judged if ok and not s["facts_ok"]),
+            "strings_only": sorted(label(r) for r, s, ok in judged if not ok and s["facts_ok"])}
+
+
 def percentile(values: list[float], pct: float) -> float | None:
     """Nearest-rank percentile; None for an empty list."""
     if not values:
@@ -90,11 +125,13 @@ def _avg(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def aggregate(runs: list[dict], questions: list[dict]) -> dict:
+def aggregate(runs: list[dict], questions: list[dict], verdicts: dict[str, dict] | None = None) -> dict:
     """Score every record and compute the per-system metrics shown in the report.
 
     Records whose qid is no longer in questions.jsonl are counted in
     ``unknown_qids`` and left out, instead of being scored against nothing.
+    ``verdicts`` (from ``load_verdicts``) adds a ``judge`` entry per system;
+    without it the result is exactly what it was before the judge existed.
     """
     by_id = {q["id"]: q for q in questions}
     out: dict = {"systems": {}, "unknown_qids": 0}
@@ -137,6 +174,8 @@ def aggregate(runs: list[dict], questions: list[dict]) -> dict:
             "top_tags": tags.most_common(3),
             "phrasing": phrasing_consistency(items),
         }
+        if verdicts is not None:
+            out["systems"][system]["judge"] = judge_summary(items, verdicts)
     # Paired comparison on the (question, repeat) pairs both systems answered;
     # "first" is the workflow, "second" the agent.
     out["paired"] = (paired_outcomes(outcomes["workflow"], outcomes["agent"])
@@ -224,7 +263,15 @@ def render_markdown(agg: dict, runs_name: str, png_note: str) -> str:
                   f"| injection followed | {_num(m['injection_pct'])}{'%' if m['injection_pct'] is not None else ''} |",
                   f"| source recall | {_num(m['source_recall'], '{:.2f}')} |",
                   f"| tool-use accuracy | {m['tool_use_pct']:.1f}% |",
-                  f"| top failure tags | {tags} |", ""]
+                  f"| top failure tags | {tags} |"]
+        if "judge" in m:
+            j = m["judge"]
+            rate = f"{100 * j['passed'] / j['n']:.1f}% ({j['passed']}/{j['n']})" if j["n"] else "n/a"
+            lines += [f"| LLM judge (secondary): success with judged facts | {rate} |",
+                      f"| LLM judge: 95% interval | {_ci(j['wilson'])} |",
+                      f"| facts: judge yes, strings no | {', '.join(j['judge_only']) or 'none'} |",
+                      f"| facts: strings yes, judge no | {', '.join(j['strings_only']) or 'none'} |"]
+        lines.append("")
     systems = list(agg["systems"])
     if systems:
         lines += ["## Success by question type", "",
@@ -271,9 +318,11 @@ def plot_success_by_type(agg: dict, png_path: Path) -> bool:
     return True
 
 
-def build_report(runs_path: Path, questions_path: Path, out_md: Path, out_png: Path) -> dict:
+def build_report(runs_path: Path, questions_path: Path, out_md: Path, out_png: Path,
+                 judge_path: Path | None = None) -> dict:
     """Score, aggregate, write the markdown (and the chart if possible); return the aggregate."""
-    agg = aggregate(load_runs(runs_path), load_questions(questions_path))
+    verdicts = load_verdicts(judge_path) if judge_path else None
+    agg = aggregate(load_runs(runs_path), load_questions(questions_path), verdicts)
     if agg["systems"] and plot_success_by_type(agg, out_png):
         note = f"![success by type]({out_png.name})"
     else:
@@ -335,11 +384,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
     p.add_argument("--out", type=Path, default=PROJECT_ROOT / "docs" / "results.md")
     p.add_argument("--png", type=Path, default=PROJECT_ROOT / "docs" / "success_by_type.png")
+    p.add_argument("--judge", type=Path, default=None,
+                   help="Verdicts from eval.judge; adds the LLM judge rows (off by default).")
     args = p.parse_args(argv)
     if len(args.runs) > 1:
+        if args.judge:
+            p.error("--judge holds one runs file's verdicts: pass a single --runs file")
         build_cross_report(args.runs, args.questions, args.out)
     else:
-        build_report(args.runs[0], args.questions, args.out, args.png)
+        build_report(args.runs[0], args.questions, args.out, args.png, args.judge)
     print(f"wrote {args.out}")
 
 
