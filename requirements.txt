@@ -2,7 +2,7 @@
 langgraph>=0.4
 langgraph-checkpoint-sqlite>=2.0
 pydantic>=2.14.0
-requests>=2.31
+requests>=2.34.2
 python-dotenv>=1.0
 streamlit>=1.65.0
 matplotlib>=3.8
