@@ -3,6 +3,7 @@
 Usage (from the project root):
     python -m eval.run_compare --run-id r1 [--repeats 3] [--systems workflow,agent]
                                [--type numeric] [--limit 5] [--sleep 2]
+                               [--models openai/gpt-oss-20b,openai/gpt-oss-120b]
 
 Why it is built this way:
 - Every (system, qid, repeat, run_id) gets a sha256 key. Keys already present in
@@ -28,6 +29,14 @@ Why it is built this way:
   measured inside ``answer_question`` exactly as with one worker; only the
   batch finishes sooner. Records are appended under a lock, in completion
   order, which the idempotency keys make harmless.
+- ``--models`` (or ``RR_EVAL_MODELS``) runs the same batch once per model, one
+  after the other, each into its own file
+  ``runs/<run_id>--<provider>-<model>.jsonl`` with its own idempotency keys. A
+  model is ``name`` (configured provider) or ``provider:name``
+  (``ollama:llama3.2:3b``). Separate files keep every existing tool working
+  per model unchanged (report, API, resume), and a model that stops half-way
+  resumes on its own. Without the flag nothing changes: one file
+  ``runs/<run_id>.jsonl`` with the configured model.
 """
 
 from __future__ import annotations
@@ -36,6 +45,7 @@ import argparse
 import hashlib
 import json
 import queue
+import re
 import threading
 import time
 import traceback
@@ -90,12 +100,41 @@ def _append(path: Path, obj: dict) -> None:
         fh.flush()
 
 
-def run_settings() -> dict:
-    """Provider, model, cache flag and budget of this process, stored with every record."""
+PROVIDERS = ("groq", "ollama")
+
+
+def parse_model_spec(spec: str, default_provider: str) -> tuple[str, str]:
+    """Split ``provider:name`` into (provider, name); a bare name keeps the default provider.
+
+    Only a known provider counts as a prefix, because Ollama model names carry
+    their own colon (``llama3.2:3b``).
+    """
+    head, sep, rest = spec.strip().partition(":")
+    if sep and head in PROVIDERS and rest:
+        return head, rest
+    return default_provider, spec.strip()
+
+
+def model_run_id(run_id: str, provider: str, model: str) -> str:
+    """Run id of one model's share of a cross-model batch; also its file name stem.
+
+    Every run of characters outside [A-Za-z0-9_.-] becomes "-", so the file name
+    is one plain component that the API's run-name check accepts.
+    """
+    return f"{run_id}--" + re.sub(r"[^\w.-]+", "-", f"{provider}-{model}").strip("-")
+
+
+def run_settings(provider: str | None = None, model: str | None = None) -> dict:
+    """Provider, model, cache flag and budget of a run, stored with every record.
+
+    ``provider``/``model`` override the configured ones for a cross-model run.
+    """
     from rr import settings
 
-    model = settings.GROQ_MODEL if settings.LLM_PROVIDER == "groq" else settings.OLLAMA_MODEL
-    return {"provider": settings.LLM_PROVIDER, "model": model, "llm_cache": settings.LLM_CACHE,
+    provider = provider or settings.LLM_PROVIDER
+    if model is None:
+        model = settings.GROQ_MODEL if provider == "groq" else settings.OLLAMA_MODEL
+    return {"provider": provider, "model": model, "llm_cache": settings.LLM_CACHE,
             "max_steps": settings.MAX_STEPS, "max_tokens": settings.MAX_TOKENS}
 
 
@@ -112,22 +151,23 @@ def _default_answer_fn() -> Callable[..., dict]:
     return answer_question
 
 
-def make_worker_llms(workers: int) -> list:
+def make_worker_llms(workers: int, provider: str | None = None, model: str | None = None) -> list:
     """One ChatLLM per worker, each pinned to a single Groq key (capped at the key count).
 
     Two workers on the same key would both run into that key's rate limit and
     wait on it in turn, which is slower than one worker; with Ollama there is no
-    key, so the requested number of workers is kept.
+    key, so the requested number of workers is kept. ``provider``/``model``
+    select another model than the configured one (cross-model runs).
     """
     from rr.llm import ChatLLM
 
-    base = ChatLLM()
+    base = ChatLLM(provider, model)
     if base.provider != "groq":
-        return [ChatLLM() for _ in range(max(1, workers))]
+        return [ChatLLM(provider, model) for _ in range(max(1, workers))]
     n = max(1, min(workers, len(base.keys)))
     llms = []
     for i in range(n):
-        llm = ChatLLM()
+        llm = ChatLLM(provider, model)
         llm.keys = [base.keys[i]]
         llms.append(llm)
     return llms
@@ -221,6 +261,9 @@ def main(argv: list[str] | None = None) -> None:
                    help="Print the calls still to make and their worst-case cost, then stop.")
     p.add_argument("--workers", type=int, default=1,
                    help="Calls to run at a time, one Groq key each (capped at the key count).")
+    p.add_argument("--models", default=None,
+                   help="Comma-separated models, one runs file each: name or provider:name "
+                        "(default: RR_EVAL_MODELS, else the configured model only).")
     args = p.parse_args(argv)
 
     systems = tuple(s.strip() for s in args.systems.split(",") if s.strip())
@@ -228,22 +271,42 @@ def main(argv: list[str] | None = None) -> None:
     if unknown:
         p.error(f"unknown system(s): {', '.join(sorted(unknown))}")
     questions = load_questions(args.questions, args.qtype, args.limit)
-    meta = run_settings()
-    seen = done_keys(Path(args.runs_dir) / f"{args.run_id}.jsonl")
-    pending = sum(record_key(s, q["id"], r, args.run_id) not in seen
-                  for r in range(args.repeats) for q in questions for s in systems)
-    print(f"run {args.run_id} with {meta['provider']} {meta['model']} (cache "
-          f"{'on' if meta['llm_cache'] else 'off'}): "
-          + estimate(pending, meta["max_steps"], meta["max_tokens"]))
+    from rr import settings
+
+    raw = args.models if args.models is not None else settings.EVAL_MODELS
+    specs = [m for m in raw.split(",") if m.strip()]
+    # (run id, provider, model); None/None is the configured model in <run_id>.jsonl.
+    targets = [(args.run_id, None, None)] if not specs else [
+        (model_run_id(args.run_id, *pm), *pm)
+        for pm in (parse_model_spec(m, settings.LLM_PROVIDER) for m in specs)]
+    if len({t[0] for t in targets}) < len(targets):
+        p.error("--models lists the same model twice")
+    for run_id, provider, model in targets:
+        meta = run_settings(provider, model)
+        seen = done_keys(Path(args.runs_dir) / f"{run_id}.jsonl")
+        pending = sum(record_key(s, q["id"], r, run_id) not in seen
+                      for r in range(args.repeats) for q in questions for s in systems)
+        print(f"run {run_id} with {meta['provider']} {meta['model']} (cache "
+              f"{'on' if meta['llm_cache'] else 'off'}): "
+              + estimate(pending, meta["max_steps"], meta["max_tokens"]))
     if args.estimate:
         return
-    llms = make_worker_llms(args.workers) if args.workers > 1 else None
-    meta["workers"] = len(llms) if llms else 1
-    if llms and len(llms) < args.workers:
-        print(f"only {len(llms)} worker(s): one Groq key each, and that many keys are configured")
-    stats = run(args.run_id, questions, systems, args.repeats, args.runs_dir, sleep_s=args.sleep,
-                run_meta=meta, llms=llms)
-    print(f"run {args.run_id}: {stats}  -> {Path(args.runs_dir) / (args.run_id + '.jsonl')}")
+    for run_id, provider, model in targets:
+        meta = run_settings(provider, model)
+        llms = make_worker_llms(args.workers, provider, model) if args.workers > 1 else None
+        if llms is None and model is not None:
+            # A named model needs its own client even with one worker (otherwise
+            # answer_question builds the configured model's), holding every key
+            # as the default client does.
+            from rr.llm import ChatLLM
+
+            llms = [ChatLLM(provider, model)]
+        meta["workers"] = len(llms) if llms else 1
+        if llms and len(llms) < args.workers:
+            print(f"only {len(llms)} worker(s): one Groq key each, and that many keys are configured")
+        stats = run(run_id, questions, systems, args.repeats, args.runs_dir, sleep_s=args.sleep,
+                    run_meta=meta, llms=llms)
+        print(f"run {run_id}: {stats}  -> {Path(args.runs_dir) / (run_id + '.jsonl')}")
 
 
 if __name__ == "__main__":

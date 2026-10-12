@@ -148,10 +148,13 @@ python -m eval.run_compare --run-id r1 --repeats 3              # resumable: reu
 python -m eval.report --runs runs/r1.jsonl                      # -> docs/results.md + chart
 python -m eval.run_compare --run-id p1 --questions eval/paraphrases.jsonl   # same question, three phrasings
 python -m eval.report --runs runs/p1.jsonl --questions eval/paraphrases.jsonl --out runs/p1.md
+python -m eval.run_compare --run-id m1 --models openai/gpt-oss-20b,openai/gpt-oss-120b --estimate
+python -m eval.run_compare --run-id m1 --models openai/gpt-oss-20b,openai/gpt-oss-120b  # one runs file per model
+python -m eval.report --runs runs/m1--groq-openai-gpt-oss-20b.jsonl runs/m1--groq-openai-gpt-oss-120b.jsonl --out runs/m1.md
 python -m eval.judge --runs runs/r1.jsonl --estimate            # opt-in LLM judge: one call per record
 python -m eval.judge --runs runs/r1.jsonl                       # -> runs/r1.judge.jsonl (resumable)
 python -m eval.report --runs runs/r1.jsonl --judge runs/r1.judge.jsonl   # adds the judge rows
-python -m pytest -q                                             # 214 tests, offline
+python -m pytest -q                                             # 223 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`
@@ -217,7 +220,11 @@ embedding of that corpus. `requirements.txt` already carries what grounded-rag's
 retrieval imports; its PDF reader is not needed, the shipped corpora are text.
 
 Each record in `runs/*.jsonl` carries the provider, model, cache setting and
-budget it ran with. `eval/paraphrases.jsonl` holds 4 questions with 2
+budget it ran with. `--models` (or `RR_EVAL_MODELS`) runs one batch on several
+models, `name` or `provider:name` (`ollama:llama3.2:3b`), each into its own
+`runs/<run_id>--<provider>-<model>.jsonl`; the report given several files
+writes one cross-model table followed by each file's own report. No
+cross-model run has been made yet. `eval/paraphrases.jsonl` holds 4 questions with 2
 rephrasings each (casual, other language; `paraphrase_of` links them), and the
 report then adds a "same verdict for every phrasing" line.
 

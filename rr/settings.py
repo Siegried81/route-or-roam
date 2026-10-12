@@ -79,6 +79,11 @@ LLM_TIMEOUT_S = 60
 # Turn it off (RR_LLM_CACHE=0) to measure run-to-run variance across repeats.
 LLM_CACHE = os.getenv("RR_LLM_CACHE", "1") == "1"
 LLM_CACHE_DIR = RUNS_DIR / "llm_cache"
+# Models one evaluation batch runs on, comma-separated ("openai/gpt-oss-20b,
+# openai/gpt-oss-120b", or "ollama:llama3.2:3b" for another provider); each
+# gets its own runs file (eval/run_compare.py). Empty: the configured model
+# only. Only the evaluation reads it; the app, API and CLI keep one model.
+EVAL_MODELS = os.getenv("RR_EVAL_MODELS", "")
 
 # --- Budget (identical for both systems) ---------------------------------------
 MAX_STEPS = int(os.getenv("RR_MAX_STEPS", "8"))       # LLM calls per run

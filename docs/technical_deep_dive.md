@@ -478,6 +478,25 @@ happen. `bad_tool_args` means a hallucinated tool or a failed tool call.
   exhaustion, injection-followed rate, source recall, tool-use accuracy and the
   top failure tags. It writes `docs/results.md` and `docs/success_by_type.png`.
 
+**Several models in one batch.** `--models a,b` (or `RR_EVAL_MODELS`) runs the
+whole batch once per model, one model after the other, each into its own file
+`runs/<run_id>--<provider>-<model>.jsonl` with its own idempotency keys. A
+model is a bare name (configured provider) or `provider:name`; only `groq` and
+`ollama` count as a prefix, because Ollama names carry their own colon
+(`llama3.2:3b`). Each model gets its own client even with one worker, holding
+every key as the default client does; with `--workers N` each worker holds one
+key, as below. The records carry the model they ran on, and the LLM cache is
+keyed on the request, model included, so two models never share a cached
+reply. Separate files rather than one file with a model column: every tool
+that reads one runs file (the report, the API's Results tab, resume) works per
+model unchanged, and a model that stops half-way resumes on its own. Given
+several files, `eval/report.py` writes one page: a table of success and Wilson
+interval per (file, system), then each file's own report one heading level
+down. No test is run across files: the McNemar test pairs two systems on one
+model, and a model comparison would need its own pairing (same system, same
+question, two models), which is not built. Without `--models` nothing changes:
+one file `runs/<run_id>.jsonl` with the configured model.
+
 `--workers N` runs N calls at a time, each worker pinned to one Groq key (N is capped at the number of keys), so parallel calls never share a per-key rate limit. Each record still stores its own wall-clock latency, measured inside `answer_question` exactly as with one worker: only the batch finishes sooner. Inside one workflow run, the search node also fetches its 1 to 6 retrieval calls in parallel (local embeddings, no quota) and registers them in plan order, so the sids, the trace and the counts are those of a sequential run; the LLM calls of a run stay sequential, because each depends on the previous one.
 
 ### 8.6 Spread, intervals and the paired test (`eval/stats.py`)
@@ -709,7 +728,7 @@ by construction.
   words (a regulation described but not named) fails as `missed_hop`. The
   opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
   change it, and it is itself a model: its verdicts are a second opinion.
-- Real runs need grounded-rag's indexes and embedder; the tests (214, offline,
+- Real runs need grounded-rag's indexes and embedder; the tests (223, offline,
   scripted LLM, retrieval mocked) do not.
 
 ## 13. Roadmap
@@ -718,8 +737,11 @@ by construction.
    for a per-system spread and enough questions per type; first a re-run of
    `s120c` under the last-call step and the current refusal rule, so the
    published table matches the code.
-2. **Cross-model comparison**: the same run on `gpt-oss-20b`, `gpt-oss-120b` and
-   a local Ollama model, to separate design effects from model effects (the
-   `k=10` failure in particular).
+2. **Cross-model comparison**: the harness is built (§8.5, `--models` /
+   `RR_EVAL_MODELS`, one runs file per model, a cross-model report page); what
+   remains is the run itself on `gpt-oss-20b`, `gpt-oss-120b` and a local
+   Ollama model, to separate design effects from model effects (the `k=10`
+   failure in particular), and, if the gap is worth testing, a paired test
+   across models.
 3. **LLM judge**: built (§8.3.1, `eval/judge.py`, opt-in); what remains is to
    run it on the full run and read the "judge yes, strings no" list.

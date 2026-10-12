@@ -4,6 +4,8 @@ Usage (from the project root):
     python -m eval.report --runs runs/r1.jsonl [--questions eval/questions.jsonl]
                           [--out docs/results.md] [--png docs/success_by_type.png]
                           [--judge runs/r1.judge.jsonl]
+    python -m eval.report --runs runs/r1--A.jsonl runs/r1--B.jsonl --out runs/r1-models.md
+        (one runs file per model, from ``eval.run_compare --models``)
 
 Why it is built this way:
 - Records are scored here, at report time, with ``eval.score`` against the
@@ -26,6 +28,11 @@ Why it is built this way:
   reported value is a latency that actually happened.
 - matplotlib is optional: without it the markdown is still written and the
   chart is skipped with a note.
+- Several ``--runs`` files (one per model, from ``run_compare --models``) give
+  one page: a cross-model table of success per (file, system), then each
+  file's own report below it, computed exactly as for a single file. Files are
+  never merged, so one model's records cannot leak into another's rates.
+  With one file the output is what it always was.
 - ``--judge`` (opt-in) adds the LLM judge's verdicts from ``eval.judge`` as
   extra rows: success with the key facts judged by the LLM instead of matched
   as strings, and the records on which the two disagree about the facts. The
@@ -325,17 +332,67 @@ def build_report(runs_path: Path, questions_path: Path, out_md: Path, out_png: P
     return agg
 
 
+def _models_in(runs: list[dict]) -> str:
+    """The provider/model pairs a runs file was produced with, as stored in its records."""
+    found = sorted({f"{r.get('provider', '?')} {r.get('model', '?')}" for r in runs if "qid" in r})
+    return ", ".join(found) or "n/a"
+
+
+def render_cross_runs(entries: list[tuple[str, str, dict]]) -> str:
+    """Cross-model table: one row per (runs file, system), from each file's own aggregate.
+
+    ``entries`` are (file name, models, aggregate). Rates are the same figures
+    the per-file sections print, side by side; no test is run across files,
+    because two models are not two systems on one model.
+    """
+    lines = ["# Results across runs files", "",
+             "One row per runs file and system; each file is scored on its own, as in its "
+             "section below. Success is defined in `eval/score.py`.", "",
+             "| runs file | provider model | system | success | 95% interval |",
+             "|---|---|---|---|---|"]
+    for name, models, agg in entries:
+        for system, m in agg["systems"].items():
+            lines.append(f"| `{name}` | {models} | {system} | {_pct(m['overall'])} "
+                         f"({m['passed']}/{m['n']}) | {_ci(m['wilson'])} |")
+    return "\n".join(lines + [""])
+
+
+def build_cross_report(runs_paths: list[Path], questions_path: Path, out_md: Path) -> list[dict]:
+    """Write the cross-model page for several runs files; return their aggregates.
+
+    No chart: one grouped-bar chart per file is what ``build_report`` makes,
+    and one chart mixing files and systems would not read.
+    """
+    questions = load_questions(questions_path)
+    entries, sections = [], []
+    for path in runs_paths:
+        runs = load_runs(path)
+        agg = aggregate(runs, questions)
+        entries.append((Path(path).name, _models_in(runs), agg))
+        body = render_markdown(agg, Path(path).name, "")
+        sections.append("\n".join("#" + ln if ln.startswith("#") else ln for ln in body.splitlines()))
+    out_md.parent.mkdir(parents=True, exist_ok=True)
+    out_md.write_text("\n".join([render_cross_runs(entries), *sections]) + "\n", encoding="utf-8")
+    return [agg for _, _, agg in entries]
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point; see the module docstring for the flags."""
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--runs", type=Path, required=True)
+    p.add_argument("--runs", type=Path, nargs="+", required=True,
+                   help="One runs file, or several (one per model) for a cross-model page.")
     p.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
     p.add_argument("--out", type=Path, default=PROJECT_ROOT / "docs" / "results.md")
     p.add_argument("--png", type=Path, default=PROJECT_ROOT / "docs" / "success_by_type.png")
     p.add_argument("--judge", type=Path, default=None,
                    help="Verdicts from eval.judge; adds the LLM judge rows (off by default).")
     args = p.parse_args(argv)
-    build_report(args.runs, args.questions, args.out, args.png, args.judge)
+    if len(args.runs) > 1:
+        if args.judge:
+            p.error("--judge holds one runs file's verdicts: pass a single --runs file")
+        build_cross_report(args.runs, args.questions, args.out)
+    else:
+        build_report(args.runs[0], args.questions, args.out, args.png, args.judge)
     print(f"wrote {args.out}")
 
 
