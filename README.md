@@ -101,7 +101,9 @@ see [what the numbers don't say](docs/technical_deep_dive.md#10-what-the-numbers
   machine may approve (403 otherwise); set, the `X-Approve-Token` header has
   to match (401 otherwise). The response says `decided_by`.
 - **Untrusted-source fence** (`rr/fence.py`): passages wrapped in
-  `<untrusted_source id=S#>`, forged tags escaped, injection phrases flagged.
+  `<untrusted_source id=S#>`, forged tags escaped (spaced and fullwidth
+  look-alikes too, via NFKC), the source name attribute-escaped, injection
+  phrases flagged.
 - **Budget** (`rr/budget.py`): 8 LLM calls and 12,000 tokens per run, the same
   for both systems, checked before every call; graceful stop. When one step is
   left or 80% of the tokens are used, the agent's next call is made without
@@ -154,7 +156,7 @@ python -m eval.report --runs runs/m1--groq-openai-gpt-oss-20b.jsonl runs/m1--gro
 python -m eval.judge --runs runs/r1.jsonl --estimate            # opt-in LLM judge: one call per record
 python -m eval.judge --runs runs/r1.jsonl                       # -> runs/r1.judge.jsonl (resumable)
 python -m eval.report --runs runs/r1.jsonl --judge runs/r1.judge.jsonl   # adds the judge rows
-python -m pytest -q                                             # 223 tests, offline
+python -m pytest -q                                             # 226 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`
