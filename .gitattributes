@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers: a Windows checkout with
+# core.autocrlf=true would otherwise give them CRLF endings, and the kernel then
+# looks for "/bin/sh\r" and the container exits with "no such file or directory".
+*.sh text eol=lf
