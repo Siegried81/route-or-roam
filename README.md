@@ -48,46 +48,47 @@ flowchart LR
 
 ## Results
 
-17 stratified questions × 2 systems × 1 run, `openai/gpt-oss-120b` on Groq
-([full report](docs/results.md)). The agent was run twice: before and after one
-fix to its search tool's schema. Rates carry a 95% Wilson interval and the two
+40 questions × 2 systems × 1 run, `openai/gpt-oss-120b` on Groq, LLM cache off
+(`RR_LLM_CACHE=0`, every answer generated for this run), 14 October 2026
+([full report](docs/results.md)). Rates carry a 95% Wilson interval and the two
 systems are compared with an exact McNemar test on paired answers
 (`eval/stats.py`); with one repeat there is no run-to-run spread to report.
 
-| type (n) | workflow | agent, schema `k ≤ 8` (`s120b`) | agent, `k` capped in code (`s120c`) |
-|---|---|---|---|
-| single_hop (3) | 3/3 | 2/3 | 3/3 |
-| multi_hop (4) | 4/4 | 1/4 | 4/4 |
-| numeric (3) | 2/3 | 3/3 | 3/3 |
-| cross_corpus (3) | 2/3 | 2/3 | 3/3 |
-| unanswerable (2) | 2/2 | 0/2 | 0/2 |
-| injection (2) | 2/2 | 1/2 | 2/2 |
-| **overall** | **15/17 (88%)** | **9/17 (53%)** | **15/17 (88%)** |
-| 95% Wilson interval | 66–97% | 31–74% | 66–97% |
-| avg LLM calls · tokens in/out | 2.29 · 2139/650 | 2.00 · 2680/299 | 2.88 · 5898/448 |
-| latency p50 / p95 (s) | 42 / 85 | 22 / 63 | 25 / 111 |
-| injection followed · budget hit | 0% · 0% | 0% · 0% | 0% · 12% |
+| type (n) | workflow | agent |
+|---|---|---|
+| single_hop (10) | 7/10 | 9/10 |
+| multi_hop (10) | 7/10 | 7/10 |
+| numeric (8) | 6/8 | 8/8 |
+| cross_corpus (6) | 3/6 | 2/6 |
+| unanswerable (3) | 3/3 | 1/3 |
+| injection (3) | 2/3 | 2/3 |
+| **overall** | **28/40 (70%)** | **29/40 (72.5%)** |
+| 95% Wilson interval | 55–82% | 57–84% |
+| avg LLM calls · tokens in/out | 2.55 · 2841/915 | 3.50 · 8208/626 |
+| latency p50 / p95 (s) | 5.0 / 9.5 | 12.6 / 41.2 |
+| injection followed · budget hit | 0% · 0% | 0% · 10% |
 
-Workflow vs agent (`s120c`), paired on the 17 questions: only the workflow
-passed 2, only the agent passed 2, both 13, neither 0; exact McNemar p = 1.000.
-The numbers were scored with the current `eval/score.py` (re-scoring changed no
-verdict) but predate the agent's last-call step and the refusal rule described
-in the deep dive; a re-run is pending. They were also measured on the eval set
-as labelled against grounded-rag's earlier four-file AI Act primer, relabelled
-against the full regulation on 2026-10-11 (`docs/decisions.md`), so they are
-not comparable with a run on the current `eval/questions.jsonl`.
+Paired on the 40 questions: only the workflow passed 3, only the agent passed 4,
+both 25, neither 8; exact McNemar p = 1.000.
 
-**Takeaway:** in the first run, 7 of the agent's 8 failures were one error: the
-model asked `search_documents` for `k=10`, the published schema said at most 8,
-and Groq validates tool calls server-side, so the whole request was rejected
-(HTTP 400) even after a corrective retry. Moving the cap from the schema into
-code (`k` capped at 8, never rejected) took the agent from 9/17 to **15/17, level
-with the workflow** — with different failures: the workflow got one number and
-one hop wrong; the agent, on the two questions with no answer in the documents,
-kept searching until the token budget stopped it ("I won't guess") instead of
-refusing outright. Four discordant pairs out of 17 cannot separate the two
-systems (p = 1.000): no winner is claimed —
+**Takeaway:** the two systems are level on accuracy and fail differently. The
+agent is better on single-hop and numeric questions, where it searches again
+when the first passages are thin; the workflow is better at saying "not in the
+documents" (3/3 against 1/3) and on cross-corpus questions. The agent pays for
+its flexibility in cost and robustness: **2.9× the input tokens, 2.5× the median
+latency, a budget hit on 10% of questions**, and four answers lost to the
+provider itself — two outputs Groq could not parse, one tool call while tools
+were disabled, and one request over the free tier's 8,000 tokens-per-minute
+limit as its context grew. Seven discordant pairs out of 40 cannot separate the
+two systems (p = 1.000): no winner is claimed —
 see [what the numbers don't say](docs/technical_deep_dive.md#10-what-the-numbers-do-and-dont-say).
+
+**Earlier runs.** On a 17-question set labelled against grounded-rag's former
+four-file AI Act primer, the agent first scored 9/17 against the workflow's
+15/17: 7 of its 8 failures were Groq rejecting a `k=10` tool call that the
+published schema capped at 8. Moving the cap into code took it to 15/17. Those
+runs (`s120b`, `s120c`) are analysed in the deep dive §9; they are not
+comparable with the table above (different question set, older scorer).
 
 ## Safety controls
 

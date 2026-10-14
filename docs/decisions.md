@@ -107,3 +107,17 @@ One dated entry per change that alters what the system promises. Append, never r
 - **Measurement change:** `injection_flags` now also counts passages that use
   those spellings, so it can only go up on the same corpus; runs from before
   this date are not strictly comparable on that column.
+
+## 2026-10-14 — Results re-run on the full 40-question set, cache off
+
+- **What:** `python -m eval.run_compare --run-id r120e --models
+  openai/gpt-oss-120b --repeats 1` with `RR_LLM_CACHE=0`, then `eval.report`.
+  The README table and `docs/results.md` now report this run.
+- **Why:** the published 17-question results were labelled against a corpus that
+  no longer exists and predated the agent's last-call step and refusal rule.
+  The cache was turned off so no stored answer was replayed.
+- **What changes in the numbers:** workflow 15/17 -> 28/40, agent 15/17 ->
+  29/40; McNemar p = 1.000 in both. The agent spends 2.9x the input tokens and
+  hits its budget on 10% of questions; four agent answers were lost to provider
+  errors (two unparsable outputs, one tool call with tools disabled, one 413
+  over the 8,000 TPM free-tier limit) and are scored as failures.

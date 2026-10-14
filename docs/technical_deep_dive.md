@@ -533,6 +533,12 @@ run reported below did not reach that; see section 10.
 
 ## 9. Results
 
+> **Current figures** are the 14 October 2026 run on all 40 questions with the
+> LLM cache off: workflow 28/40, agent 29/40, McNemar p = 1.000 (README and
+> `docs/results.md`). The analysis below is of the earlier 17-question runs
+> (`s120b`, `s120c`), kept because the schema-cap failure it documents is the
+> project's clearest lesson about tool schemas on a provider that validates them.
+
 > Every figure in this section was measured on the eval set labelled against the
 > four-file AI Act primer, before its relabelling against the full regulation
 > (`docs/decisions.md`, 2026-10-11). It describes that run; a run on the current
@@ -546,7 +552,7 @@ records were scored with the current `eval/score.py` (re-scoring changed no
 verdict), but they were **produced before** the agent's last-call step
 (section 4) and the citation-aware refusal rule (section 2.4): the agent's
 `budget_exhausted` and `refused` values, and so the unanswerable row, are not
-what the current code would give. A re-run is pending.
+what the current code would give. It was re-run on 14 October 2026 (box at the top of this section).
 
 | metric | workflow | agent (`s120c`) |
 |---|---|---|
