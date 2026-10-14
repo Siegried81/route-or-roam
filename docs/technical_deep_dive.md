@@ -728,7 +728,7 @@ by construction.
   words (a regulation described but not named) fails as `missed_hop`. The
   opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
   change it, and it is itself a model: its verdicts are a second opinion.
-- Real runs need grounded-rag's indexes and embedder; the tests (223, offline,
+- Real runs need grounded-rag's indexes and embedder; the tests (226, offline,
   scripted LLM, retrieval mocked) do not.
 
 ## 13. Roadmap
