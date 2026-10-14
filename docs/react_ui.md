@@ -5,7 +5,7 @@ A second front end next to the Streamlit app (`app.py`, unchanged). It has two p
 - `api/`: a FastAPI backend on port **8001**. The ports are fixed so the three
   local apps run side by side: dreamjob owns 8000 (and Vite's 5173),
   grounded-rag's API owns 8002 (UI on 5180), this one 8001 (UI on 5181).
-- `web/`: a Vite + React 18 app with two tabs, **Ask** and **Results**.
+- `web/`: a Vite + React 19 app with two tabs, **Ask** and **Results**.
 
 ## Development (two terminals)
 
@@ -40,9 +40,9 @@ the `/api/*` routes answer.
 | Method | Path | What it returns |
 |---|---|---|
 | GET | `/api/health` | `{"status": "ok"}` |
-| GET | `/api/config` | provider, model, budgets, tool allowlist, `key_available` (a boolean, never the key; true when either this project's keys or grounded-rag's key ring is set) |
+| GET | `/api/config` | provider, model, budgets, tool allowlist, corpora, `key_available` (a boolean, never the key; true when either this project's keys or grounded-rag's key ring is set) |
 | POST | `/api/ask` | `{system: workflow\|agent\|both, question, injected_passage?, qid?}` returns, per system, the `answer_question` record, the step trace and the retrieved passages. An agent that asks for `save_report` comes back as `status: "awaiting_approval"` with a `thread_id` and the pending report. 422 on invalid input |
-| POST | `/api/approve` | `{thread_id, approve: bool}` resumes the paused agent from the checkpointer and returns its next state: the final record, or `awaiting_approval` again when the agent asks for another report. 404 if nothing is waiting under that id, 409 if the same run is already being resumed |
+| POST | `/api/approve` | `{thread_id, approve: bool}` resumes the paused agent from the checkpointer and returns its next state: the final record, or `awaiting_approval` again when the agent asks for another report, with `decided_by`. 403 from another machine while `RR_APPROVE_TOKEN` is unset, 401 if it is set and the `X-Approve-Token` header does not match, 404 if nothing is waiting under that id, 409 if the same run is already being resumed |
 | GET | `/api/questions` | the eval questions for the picker (no key facts) |
 | GET | `/api/runs` | `runs/*.jsonl`, newest first |
 | GET | `/api/results?run=<file>` | the comparison computed by `eval.report.aggregate` (scored with `eval.score`), plus a takeaway sentence derived from the numbers. 400 for a name that is not a plain `*.jsonl`, 404 if the file is missing, 422 if its lines are not run records |

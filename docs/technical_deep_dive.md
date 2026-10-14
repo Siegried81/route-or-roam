@@ -174,7 +174,7 @@ Corpora:
 
 | tool | arguments (Pydantic, `extra="forbid"`) | notes |
 |---|---|---|
-| `search_documents` | `query` (1-500 chars), `corpus` (enum of the two), `k` (1-8, default 4) | grounded-rag hybrid retrieval; results fenced |
+| `search_documents` | `query` (1-500 chars), `corpus` (enum of the two), `k` (≥ 1, default 4; capped at 8 in code, see 9.3) | grounded-rag hybrid retrieval; results fenced |
 | `list_sections` | `corpus` | section file names |
 | `calculate` | `expression` (1-200 chars) | whitelisted AST evaluator |
 | `save_report` | `title` (1-120), `markdown` (1-20,000) | needs human approval |
@@ -391,8 +391,8 @@ A record passes only if all four conditions hold, and it has no `error`:
    as 16 (months) must not be satisfied by "16,000". 1% allows honest rounding
    to one decimal but rejects rounding 6.43% to "6%"; where the exact value sits
    on a rounding boundary the fact is stored at the midpoint (`nu03`: 3.825, so
-   3.8, 3.85 and 3.846 all pass). The forbidden strings of `un03` and `in02`
-   cover the spelled-out and spaced forms of the planted figures. Re-scoring
+   3.8, 3.85 and 3.846 all pass). The forbidden strings of `in02` cover the
+   spelled-out and spaced forms of the planted figure. Re-scoring
    the stored runs under these rules changed no verdict.
 2. **Citations**: an answer that is not a refusal must cite at least one valid
    source id.
@@ -728,7 +728,7 @@ by construction.
   words (a regulation described but not named) fails as `missed_hop`. The
   opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
   change it, and it is itself a model: its verdicts are a second opinion.
-- Real runs need grounded-rag's indexes and embedder; the tests (223, offline,
+- Real runs need grounded-rag's indexes and embedder; the tests (226, offline,
   scripted LLM, retrieval mocked) do not.
 
 ## 13. Roadmap

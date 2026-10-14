@@ -72,7 +72,10 @@ Workflow vs agent (`s120c`), paired on the 17 questions: only the workflow
 passed 2, only the agent passed 2, both 13, neither 0; exact McNemar p = 1.000.
 The numbers were scored with the current `eval/score.py` (re-scoring changed no
 verdict) but predate the agent's last-call step and the refusal rule described
-in the deep dive; a re-run is pending.
+in the deep dive; a re-run is pending. They were also measured on the eval set
+as labelled against grounded-rag's earlier four-file AI Act primer, relabelled
+against the full regulation on 2026-10-11 (`docs/decisions.md`), so they are
+not comparable with a run on the current `eval/questions.jsonl`.
 
 **Takeaway:** in the first run, 7 of the agent's 8 failures were one error: the
 model asked `search_documents` for `k=10`, the published schema said at most 8,
@@ -221,8 +224,9 @@ and the first question after one waits for the download (a few MB) and the
 embedding of that corpus. `requirements.txt` already carries what grounded-rag's
 retrieval imports; its PDF reader is not needed, the shipped corpora are text.
 
-Each record in `runs/*.jsonl` carries the provider, model, cache setting and
-budget it ran with. `--models` (or `RR_EVAL_MODELS`) runs one batch on several
+Each record `eval.run_compare` writes to `runs/*.jsonl` carries the provider,
+model, cache setting and budget it ran with (the published `s120*` records
+predate this and carry none). `--models` (or `RR_EVAL_MODELS`) runs one batch on several
 models, `name` or `provider:name` (`ollama:llama3.2:3b`), each into its own
 `runs/<run_id>--<provider>-<model>.jsonl`; the report given several files
 writes one cross-model table followed by each file's own report. No
@@ -241,7 +245,9 @@ their traces and shows an approval modal when the agent asks for `save_report`.
   type. The design target (40 × 2 × 3, cache off) has not been run yet.
 - The published run predates the agent's last-call step and the stricter
   refusal rule; both change what `budget_exhausted` and `refused` mean for the
-  agent, so it needs a re-run before the unanswerable row is read again.
+  agent, so it needs a re-run before the unanswerable row is read again. It
+  also predates the relabelling of the AI Act questions against the full
+  regulation (2026-10-11).
 - Latency mostly measures free-tier rate-limit waits, not the designs.
 - Scoring is string and number matching; a correct paraphrase can fail. The
   opt-in LLM judge (`eval/judge.py`) flags those cases in extra report rows;
