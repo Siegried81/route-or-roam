@@ -19,7 +19,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- 2. Python runtime ------------------------------------------------------
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ARG GROUNDED_RAG_REPO=https://github.com/Siegried81/grounded-rag
 ARG GROUNDED_RAG_REF=main
