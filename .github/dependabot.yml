@@ -1,6 +1,10 @@
-# Dependency version updates: monthly, one grouped PR per ecosystem for minor
-# and patch releases; a major release arrives as a PR of its own, so the package
-# that breaks is named. Security updates arrive as soon as an advisory is
+# Dependency version updates, monthly. Each ecosystem gets two grouped PRs at
+# most: one for minor and patch releases, one for major releases, so a breaking
+# major is never hidden among routine bumps and the list of suspects stays short.
+# GitHub Actions are the exception: their majors rarely touch application code,
+# so every action update lands in a single PR.
+# While a group PR is open, Dependabot rebases it with newer releases instead
+# of opening another one. Security updates arrive as soon as an advisory is
 # published, whatever the schedule.
 version: 2
 updates:
@@ -12,6 +16,9 @@ updates:
       python-deps:
         patterns: ["*"]
         update-types: [minor, patch]
+      python-majors:
+        patterns: ["*"]
+        update-types: [major]
   - package-ecosystem: npm
     directory: /web
     schedule:
@@ -20,6 +27,9 @@ updates:
       web-deps:
         patterns: ["*"]
         update-types: [minor, patch]
+      web-majors:
+        patterns: ["*"]
+        update-types: [major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -27,7 +37,6 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-        update-types: [minor, patch]
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -36,3 +45,13 @@ updates:
       docker-images:
         patterns: ["*"]
         update-types: [minor, patch]
+      docker-majors:
+        patterns: ["*"]
+        update-types: [major]
+    # The runtime stage stays on python:3.12-slim: 3.15-slim has no zstandard
+    # wheel, so the image build fails. Dependabot reads 3.12 -> 3.15 as a minor
+    # bump and would put it back in the routine group. Remove this once
+    # zstandard publishes a wheel for the newer Python.
+    ignore:
+      - dependency-name: python
+        versions: [">=3.13"]
