@@ -5,7 +5,7 @@ pydantic>=2.14.1
 requests>=2.34.2
 python-dotenv>=1.2.4
 streamlit>=1.66.1
-matplotlib>=3.8
+matplotlib>=3.11.2
 pytest>=8.0
 # Needed to import grounded-rag's retrieval stack (rag.store / rag.lexical).
 numpy>=1.26
