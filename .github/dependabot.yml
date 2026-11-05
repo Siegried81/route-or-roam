@@ -1,8 +1,9 @@
 # Dependency version updates, monthly. Each ecosystem gets two grouped PRs at
 # most: one for minor and patch releases, one for major releases, so a breaking
 # major is never hidden among routine bumps and the list of suspects stays short.
-# GitHub Actions are the exception: their majors rarely touch application code,
-# so every action update lands in a single PR.
+# Two exceptions get a single PR. GitHub Actions, because their majors rarely
+# touch application code. pip, because its floors (`>=`) leave Dependabot unable
+# to tell a major from a patch (see the note on that entry).
 # While a group PR is open, Dependabot rebases it with newer releases instead
 # of opening another one. Security updates arrive as soon as an advisory is
 # published, whatever the schedule.
@@ -12,19 +13,15 @@ updates:
     directory: /
     schedule:
       interval: monthly
-    # requirements.txt pins floors (`>=`). With the default strategy the
-    # grouped run sees every floor as already satisfied and reports "Nothing
-    # to update", then the per-package run raises each floor anyway, one PR
-    # per package. "increase" makes both runs raise the floor, so the bumps
-    # land in the groups below.
-    versioning-strategy: increase
+    # One group with no update-types filter. requirements.txt pins floors
+    # (`>=`), so Dependabot has no current version to compare against (its
+    # log says "Updating pydantic from  to 2.14.2") and cannot tell a major
+    # from a patch. A group filtered on update-types then matches nothing,
+    # reports "Nothing to update", and every bump falls back to a PR of its
+    # own. Without the filter, all of them land in this one PR.
     groups:
       python-deps:
         patterns: ["*"]
-        update-types: [minor, patch]
-      python-majors:
-        patterns: ["*"]
-        update-types: [major]
   - package-ecosystem: npm
     directory: /web
     schedule:
