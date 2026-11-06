@@ -247,6 +247,17 @@ def test_runs_list(client, runs_dir):
     assert [r["name"] for r in runs] == ["live.jsonl"] and runs[0]["records"] == 5
 
 
+def test_judge_and_dead_letter_files_are_not_listed_or_scored_as_runs(client, runs_dir):
+    # Both sit in runs/ as *.jsonl and their lines carry qid and system, so a
+    # plain glob would list them and score every judged record as a failure.
+    verdict = json.dumps({"qid": "sh01", "system": "workflow", "repeat": 0, "verdict": "correct"})
+    (runs_dir / "live.judge.jsonl").write_text(verdict, encoding="utf-8")
+    (runs_dir / "dead_letter.jsonl").write_text(verdict, encoding="utf-8")
+    assert [r["name"] for r in client.get("/api/runs").json()] == ["live.jsonl"]
+    for name in ("live.judge.jsonl", "dead_letter.jsonl"):
+        assert client.get("/api/results", params={"run": name}).status_code == 400
+
+
 def test_results_aggregation_tolerates_partial_last_line(client, runs_dir):
     body = client.get("/api/results", params={"run": "live.jsonl"}).json()
     assert body["records"] == 5

@@ -125,11 +125,12 @@ the shared budget of 8 LLM calls.
   into `stop_reason="error"` instead of raising.
 - `check_answer`: forces the refusal sentence when there are no passages,
   normalises citations, runs grounded-rag's verifier, and extracts the valid
-  citations. An answer is `refused` when it contains grounded-rag's exact
-  refusal sentence in any of its languages (English, French, Dutch: a question
-  asked in French is often refused in French) **and** cites nothing. An answer
-  that cites a source after a refusal sentence is making a claim, so it is
-  scored as an answer. The earlier rule (the English sentence alone, citations
+  citations. An answer is `refused` when it is grounded-rag's exact refusal
+  sentence in any of its languages (English, French, Dutch: a question asked
+  in French is often refused in French) **and nothing else**, curly
+  apostrophes folded to straight ones (`is_refusal`). Any other word is a
+  claim: "Revenue was 416 billion. I couldn't find anything..." asserts a
+  figure, cited or not, so it is scored as an answer. The earlier rule (the English sentence alone, citations
   ignored) counted some cited answers as refusals; records scored before this
   rule are not comparable on `refused`.
 - `to_result`: projects the final state onto the result contract.
@@ -216,7 +217,11 @@ last call can overshoot the token limit by its own size: a hard pre-call cap
 would need a token estimate that is not reliable enough.
 
 **The last call (`rr/agent.py`).** `budget.nearly_exhausted` is true when one
-step is left or 80% of the tokens are used. The agent's next call is then made
+step is left, when 80% of the tokens are used, or when one more call as large as
+the previous one would reach the token cap. The third test exists because the
+agent's prompt grows with every search (a `k=8` search adds 3 to 4k tokens), so
+a single turn could jump from under 80% to past 100% and the run stopped on
+`max_tokens` without ever making the last call. The agent's next call is then made
 **without tools**, with one extra instruction: this is the last call, answer
 from the sources above with citations or reply with the exact refusal sentence.
 A tool call the model still produces is dropped and its text kept. The budget
@@ -282,7 +287,9 @@ systems apply the same fence:
 - the system prompt says text inside those tags is quoted data, never
   instructions, and must not change the task, tools or output format;
 - any `<untrusted_source` or `</untrusted_source` inside a passage is escaped,
-  so a passage cannot close or forge the fence;
+  so a passage cannot close or forge the fence. Detection runs on an NFKC copy
+  with invisible format characters (zero-width space, soft hyphen, word
+  joiner) removed, so fullwidth or zero-width-padded tags are caught too;
 - a regex scan for instruction-like phrases (English and French: "ignore
   previous instructions", "you are now", "system prompt", "call the X tool",
   `save_report`, "ignorez les instructions", ...) tags a passage
@@ -316,13 +323,16 @@ better transport. Provider is Groq (default) or a local Ollama through its
   waits that long (capped at 65 s, one full per-minute window) instead of the
   exponential 1/2/4 s guess, which would only burn retries inside the same
   window.
-- **Three intermittent gpt-oss 400s, retried once** with a corrected request:
+- **Four intermittent gpt-oss 400s, retried once** with a corrected request:
   1. Groq rejects the JSON the model produced in JSON mode: retried without
      JSON mode (callers already extract the JSON object from free text);
   2. the model calls a tool on a request that offered none: retried with an
      explicit "no tools are available" instruction;
   3. Groq rejects a malformed tool call ("Tool call validation failed"):
-     retried with a reminder to use only the documented arguments.
+     retried with a reminder to use only the documented arguments;
+  4. Groq cannot parse the generation into text and tool calls
+     (`output_parse_failed`, two agent answers lost in the 14 October run):
+     retried with a reminder to send one well-formed tool call or plain text.
   A second failure is recorded, so a model that keeps producing bad calls
   still shows up in the evaluation.
 - **Malformed and empty replies.** A 200 whose body is not the expected shape
@@ -470,7 +480,10 @@ happen. `bad_tool_args` means a hallucinated tool or a failed tool call.
 - **Dead letter**: an exception from `answer_question` is not a result; it goes
   to `runs/dead_letter.jsonl` and is retried on the next resume. A record that
   comes back with its own `error` field *is* a result (the system failed
-  gracefully) and is scored as a failure.
+  gracefully) and is scored as a failure, except a `TransientLLMError` (rate
+  limit, 5xx or network failure that outlasted the backoff): it says nothing
+  about the system and would weigh on the one that makes more calls, so it is
+  parked in the dead letter and retried too.
 - **Raw storage**: records are stored unscored. `eval/report.py` scores them
   against the current questions, computes success per repeat, and reports mean
   ± sample standard deviation across repeats, nearest-rank p50/p95 latency
@@ -534,7 +547,8 @@ run reported below did not reach that; see section 10.
 ## 9. Results
 
 > **Current figures** are the 14 October 2026 run on all 40 questions with the
-> LLM cache off: workflow 28/40, agent 29/40, McNemar p = 1.000 (README and
+> LLM cache off, re-scored on 6 November 2026 after three labels gained their
+> French forms: workflow 30/40, agent 29/40, McNemar p = 1.000 (README and
 > `docs/results.md`). The analysis below is of the earlier 17-question runs
 > (`s120b`, `s120c`), kept because the schema-cap failure it documents is the
 > project's clearest lesson about tool schemas on a provider that validates them.
@@ -547,7 +561,9 @@ run reported below did not reach that; see section 10.
 **Final state (run `s120c`, after one fix).** The agent was re-run alone after
 the `k` fix described in 9.3 below; the workflow's 17 records are carried over
 unchanged from `s120b` (same code path, responses served from the cache).
-Full output: [results.md](results.md); raw records: `runs/s120c.jsonl`. The
+Raw records: `runs/s120c.jsonl` (`docs/results.md` now holds the 40-question
+run; `python -m eval.report --runs runs/s120c.jsonl --out runs/s120c.md`
+rebuilds this one). The
 records were scored with the current `eval/score.py` (re-scoring changed no
 verdict), but they were **produced before** the agent's last-call step
 (section 4) and the citation-aware refusal rule (section 2.4): the agent's
@@ -649,6 +665,13 @@ top of this section: 15/17.
 
 ## 10. What the numbers do and don't say
 
+The bullets below were written for the 17-question runs of section 9. On the
+current 40-question run the same caveats hold with other numbers: Wilson
+intervals of 60–86% (workflow) and 57–84% (agent), 9 discordant pairs, 3 to 10
+questions per type. Its failures cluster on one date (Article 113 of the AI
+Act, needed by about half of them) and on French questions asked against an
+English corpus; none comes from a wrong label.
+
 What they say:
 
 - On this sample, the first run gave the workflow 15/17 and the agent 9/17, and
@@ -734,7 +757,7 @@ by construction.
   words (a regulation described but not named) fails as `missed_hop`. The
   opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
   change it, and it is itself a model: its verdicts are a second opinion.
-- Real runs need grounded-rag's indexes and embedder; the tests (226, offline,
+- Real runs need grounded-rag's indexes and embedder; the tests (242, offline,
   scripted LLM, retrieval mocked) do not.
 
 ## 13. Roadmap

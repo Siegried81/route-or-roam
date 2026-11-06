@@ -169,7 +169,7 @@ def get_results(run: str = Query(..., min_length=1, max_length=200)) -> dict:
     """Scored comparison of one runs file (tolerates a partially written last line)."""
     path = results.safe_run_path(RUNS_DIR, run)
     if path is None:
-        raise HTTPException(400, "run must be a plain *.jsonl file name")
+        raise HTTPException(400, "run must be a plain *.jsonl runs file name")
     if not path.is_file():
         raise HTTPException(404, f"run {run} not found")
     try:

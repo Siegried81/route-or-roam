@@ -121,3 +121,48 @@ One dated entry per change that alters what the system promises. Append, never r
   hits its budget on 10% of questions; four agent answers were lost to provider
   errors (two unparsable outputs, one tool call with tools disabled, one 413
   over the 8,000 TPM free-tier limit) and are scored as failures.
+
+## 2026-11-06: Audit fixes, and three labels accept their French forms
+
+- **Labels (`eval/questions.jsonl`, mirrored in `eval/paraphrases.jsonl`):**
+  sh08 accepts "interdits/interdite/prohibé(e)(s)", mh07 accepts
+  "subliminale(s)/subliminaux", mh09 accepts "fournisseur" (singular). These
+  questions are asked in French, and a right answer written in French failed
+  only because its inflection was missing from the alias list.
+  - **What changes in the numbers:** the 14 October records, re-scored with no
+    new LLM call, go from workflow 28/40 to 30/40 (mh07 and mh09: both answers
+    are correct, read by eye). The agent stays at 29/40. No record changed
+    from pass to fail. Paired: 5 workflow-only, 4 agent-only, McNemar p =
+    1.000. README and `docs/results.md` report the re-scored figures.
+- **Refusal (`rr/common.py::is_refusal`):** an answer is a refusal only when it
+  is the refusal sentence and nothing else. Before, any answer that *contained*
+  the sentence and cited nothing counted, so "Revenue was 416 billion. I
+  couldn't find anything..." passed an unanswerable question. Curly
+  apostrophes are now folded first. Measured on the 254 stored records: no
+  `refused` value would change (every recorded refusal is the bare sentence).
+- **Last call (`rr/budget.py::nearly_exhausted`):** also true when one more
+  call as large as the previous one would reach the token cap. The agent's
+  prompt grows by 3 to 4k tokens per search, so it could jump past 100% from
+  under 80% and stop on `max_tokens` with the budget message. That is what
+  happened to agent cc06, in03 and mh08 on 14 October (its three
+  `loop_or_budget` failures). It changes what `budget_exhausted` means for the
+  agent: future runs should show fewer budget stops and more last-call answers
+  or refusals. The workflow is unaffected (it never reaches 80%).
+- **Groq `output_parse_failed` (`rr/llm.py`):** retried once with a format
+  reminder, like the three other model-caused 400s. It cost agent mh07 and
+  mh09 on 14 October.
+- **Rate limits (`eval/run_compare.py`):** a record whose error is a
+  `TransientLLMError` (a 429, 5xx or network failure that outlasted the
+  backoff) goes to the dead letter and is retried on resume, instead of being
+  scored as the system's failure. live1.jsonl held 27 agent and 23 workflow
+  such records. It changes what an `error` record means: from now on it is a
+  model or request failure, never a quota.
+- **Fence (`rr/fence.py`):** zero-width spaces, soft hyphens and word joiners
+  are removed before tag and marker detection, so `<\u200b/untrusted_source>`
+  no longer closes the fence unseen. `injection_flags` can only go up.
+- **Results API (`api/results.py`):** `*.judge.jsonl` and `dead_letter.jsonl`
+  are no longer listed or scored as runs.
+- **Not changed, open questions:** the workflow's `k=4` against the agent's
+  self-chosen `k` up to 8, the single calculator expression, and McNemar
+  pairing on (question, repeat) when repeats are cached replays. Each changes
+  the comparison itself, so each is a design decision, not a fix.

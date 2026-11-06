@@ -236,6 +236,32 @@ def test_a_second_rejected_tool_call_is_reported(monkeypatch):
         ChatLLM("groq").chat([{"role": "user", "content": "q"}], tools=[{"type": "function"}])
 
 
+PARSE_FAILED = ('{"error":{"message":"Parsing failed. The model generated output that could '
+                'not be parsed.","code":"output_parse_failed"}}')
+
+
+@pytest.mark.parametrize("tools", [None, [{"type": "function"}]])
+def test_an_unparsable_generation_is_retried_once_with_a_format_reminder(monkeypatch, tools):
+    # The exact Groq body recorded for agent mh07 and mh09 in the 14 October run.
+    monkeypatch.setattr(settings, "GROQ_API_KEYS", ["k1"])
+    sent = []
+
+    def post(url, json, headers, timeout):
+        sent.append(json)
+        return _Resp400(PARSE_FAILED) if len(sent) == 1 else _Resp(200, BODY)
+
+    monkeypatch.setattr(requests, "post", post)
+    ChatLLM("groq").chat([{"role": "user", "content": "q"}], tools=tools)
+    assert len(sent) == 2 and "could not be parsed" in sent[1]["messages"][-1]["content"]
+
+
+def test_a_second_unparsable_generation_is_reported(monkeypatch):
+    monkeypatch.setattr(settings, "GROQ_API_KEYS", ["k1"])
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp400(PARSE_FAILED))
+    with pytest.raises(LLMError, match="output_parse_failed"):
+        ChatLLM("groq").chat([{"role": "user", "content": "q"}])
+
+
 @pytest.mark.parametrize("body", [{}, {"choices": []}, {"choices": [{"message": {
     "tool_calls": [{"id": "c1", "function": {}}]}}]}])
 def test_a_malformed_reply_is_an_llm_error(monkeypatch, body):
