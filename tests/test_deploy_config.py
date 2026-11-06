@@ -66,6 +66,42 @@ def test_compose_persists_the_index_where_the_image_expects_it():
     assert "8001:8001" in api["ports"]
 
 
+def test_image_and_ci_use_the_same_grounded_rag_commit():
+    """The tests, the CI image and the published image must all build one grounded-rag commit."""
+    ci_ref = _yaml(".github/workflows/ci.yml")["env"]["GROUNDED_RAG_REF"]
+    docker_ref = re.search(r"ARG GROUNDED_RAG_REF=(\S+)", _dockerfile()).group(1)
+    assert docker_ref == ci_ref and re.fullmatch(r"[0-9a-f]{40}", docker_ref)
+
+
+def test_lock_satisfies_every_declared_requirement():
+    """A floor raised in requirements.txt (Dependabot does this) must be followed by a new lock.
+
+    Regenerate with the command at the top of requirements.lock.
+    """
+    from packaging.requirements import Requirement
+
+    lock = {}
+    for line in (ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines():
+        if "==" in line and not line.lstrip().startswith("#"):
+            name, version = line.split("==")
+            lock[re.sub(r"[-_.]+", "-", name.strip().lower())] = version.strip()
+    for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        line = line.split("#")[0].strip()
+        if not line:
+            continue
+        req = Requirement(line)
+        name = re.sub(r"[-_.]+", "-", req.name.lower())
+        assert name in lock, f"{req.name} is not in requirements.lock"
+        assert req.specifier.contains(lock[name]), f"{req.name}=={lock[name]} breaks {req}"
+
+
+def test_actions_are_pinned_to_commits():
+    for name in ("ci.yml", "publish.yml"):
+        text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        for ref in re.findall(r"uses:\s*\S+@(\S+)", text):
+            assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{name}: {ref} is a movable tag"
+
+
 def test_ci_workflow_covers_tests_web_and_docker():
     workflow = _yaml(".github/workflows/ci.yml")
     jobs = workflow["jobs"]

@@ -67,9 +67,8 @@ function StepDetail({ step }) {
       return (
         <div className="detail">
           {d.plan.fallback && <div className="event ev-fallback"><strong>fallback</strong> The plan was invalid; searching the literal question in every corpus.</div>}
-          <div className="kv"><span>corpora</span>{d.plan.corpora.map((c) => <code key={c}>{c}</code>)}</div>
-          <div className="kv"><span>queries</span>
-            <ul className="plain">{d.plan.sub_queries.map((q, i) => <li key={i}>{q}</li>)}</ul>
+          <div className="kv"><span>searches</span>
+            <ul className="plain">{(d.plan.searches || []).map((s, i) => <li key={i}><code>{s.corpus}</code> {s.query}</li>)}</ul>
           </div>
           <div className="kv"><span>needs math</span>{d.plan.needs_math ? "yes" : "no"}</div>
         </div>

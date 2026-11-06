@@ -166,3 +166,43 @@ One dated entry per change that alters what the system promises. Append, never r
   self-chosen `k` up to 8, the single calculator expression, and McNemar
   pairing on (question, repeat) when repeats are cached replays. Each changes
   the comparison itself, so each is a design decision, not a fix.
+
+## 2026-11-06: Design changes from the audit (plan, calculator, last call, pairing, guards)
+
+- **Workflow plan:** each search names its own corpus (1 to 4 searches)
+  instead of every query going to every corpus. Queries are written in
+  English in both systems (`QUERY_LANGUAGE_RULE`); the agent's prompt still
+  said "search the French corpus in French", left over from the French primer
+  replaced on 2026-10-11.
+- **Calculator:** the workflow asks for 1 to 3 expressions in its one calc
+  call, and the shared calculator gains `days_between` for ISO dates. Both
+  systems get the date function, so it does not favour one.
+- **Agent last call:** built from the fenced passages, the calculator results
+  and the question, like the workflow's answer step, instead of the tool-call
+  conversation sent without tools (gpt-oss called a tool anyway and Groq
+  rejected the request twice, agent cc03).
+- **Retrieval depth, not equalised:** the workflow keeps k=4, the agent picks
+  up to 8 (it chose 8 on 68 of 87 searches). At k=8 the workflow's 4 searches
+  would overrun the 12k-token budget and Groq's 8k-token request limit.
+  `RR_WORKFLOW_SEARCH_K` lets a run test it. The difference is now stated in
+  the deep dive instead of being hidden behind "same tools".
+- **McNemar:** pairs are questions (strict majority over repeats), not
+  (question, repeat). With the LLM cache on, repeats are replays and the old
+  pairing made p-values far too small (5 discordant questions over 3 repeats:
+  p = 6e-5 instead of 0.0625). On the published one-repeat run nothing
+  changes but the sentence.
+- **What changes in the numbers:** the plan, calculator, prompt and last-call
+  changes alter both systems' behaviour, so runs before this date are not
+  comparable with runs after it. The published figures are still the
+  14 October records; a new run is needed to measure the effect.
+- **API guards:** `RR_API_KEY` and `RR_RATE_LIMIT_PER_MINUTE` protect
+  `/api/ask`, both off by default; `render.yaml` sets the rate limit to 6.
+- **Stack:** the Dockerfile builds grounded-rag at the same pinned commit as
+  CI (68b8b93, checked by a test; `eval.locate_gold` reports nothing missing),
+  instead of `main`. The image installs `requirements.lock` (Python 3.12,
+  Linux), test tools moved to `requirements-dev.txt`, `npm ci` no longer falls
+  back to `npm install`, CI builds the UI on Node 26 like the image, Actions
+  are pinned to SHAs, CI runs on pushes to main and on PRs (not twice per PR
+  push), the compose Ollama image is pinned, and Dependabot may now propose
+  Python 3.13 and 3.14 base images (only 3.15 lacks a zstandard wheel).
+

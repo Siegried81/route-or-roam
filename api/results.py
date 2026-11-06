@@ -69,7 +69,7 @@ def _ratio(a, b) -> float | None:
 def takeaway(systems: dict, paired: dict | None = None) -> str:
     """One sentence comparing workflow and agent, derived only from the aggregate.
 
-    When both systems answered the same (question, repeat) pairs, the verdict
+    When both systems answered the same questions, the verdict
     comes from the exact McNemar test on those pairs (eval/stats.py): a gap is
     only called a difference when p < 0.05. Without pairs it falls back to the
     gap-versus-spread rule. The largest per-type gap is reported with its n,

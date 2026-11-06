@@ -9,8 +9,9 @@ FY2025 10-K and the full text of the EU AI Act, both in English) in two ways, an
 the difference:
 
 - **System A, workflow** (`rr/workflow.py`): code fixes the route. The model
-  plans the searches, may write one arithmetic expression, and writes the
-  answer. At most 4 LLM calls, by construction.
+  plans the searches (each query with its corpus), may write up to three
+  calculator expressions, and writes the answer. At most 4 LLM calls, by
+  construction.
 - **System B, agent** (`rr/agent.py`): a ReAct agent. The model picks which
   tools to call, with what arguments and how many times. Code only guards it.
 
@@ -89,7 +90,10 @@ cannot separate the two systems (p = 1.000), so no winner is claimed. See
 Half of the 23 failures need one date, Article 113 of the AI Act, which is a
 single short chunk that rarely ranks for "when does X apply". All nine AI Act
 questions are asked in French against an English corpus, and the workflow's
-plan sometimes searches in French. Neither failure comes from a wrong label.
+plan sometimes searched in French. None of the failures comes from a wrong
+label. Changes made after this run to address both (English queries, paired
+plan, several calculator expressions, a rebuilt last call for the agent) are
+in `docs/decisions.md` (2026-11-06); they need a new run before they show here.
 
 **Earlier runs.** On a 17-question set labelled against grounded-rag's former
 four-file AI Act primer, the agent first scored 9/17 against the workflow's
@@ -127,7 +131,7 @@ comparable with the table above (different question set, older scorer).
   retry on failure. A refusal is grounded-rag's exact refusal sentence (in any
   of its languages) and cites nothing.
 - **Free-tier resilience** (`rr/llm.py`): 5-key rotation, waits for the
-  announced rate-limit window, retries three known gpt-oss 400s once, caches
+  announced rate-limit window, retries four known gpt-oss 400s once, caches
   replies on disk (`RR_LLM_CACHE`); a malformed or empty reply is an error,
   never cached.
 
@@ -138,7 +142,7 @@ Linux / WSL (Windows PowerShell: `.venv\Scripts\activate` and `copy`):
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.lock -r requirements-dev.txt   # exact versions (Python 3.12) + test tools
 cp .env.example .env               # optional: GROQ_API_KEY .. _5, RR_GROQ_MODEL
 ```
 
@@ -168,7 +172,7 @@ python -m eval.report --runs runs/m1--groq-openai-gpt-oss-20b.jsonl runs/m1--gro
 python -m eval.judge --runs runs/r1.jsonl --estimate            # opt-in LLM judge: one call per record
 python -m eval.judge --runs runs/r1.jsonl                       # -> runs/r1.judge.jsonl (resumable)
 python -m eval.report --runs runs/r1.jsonl --judge runs/r1.judge.jsonl   # adds the judge rows
-python -m pytest -q                                             # 242 tests, offline
+python -m pytest -q                                             # 262 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`
@@ -187,15 +191,30 @@ npm, Actions and the base images, and one PR per major release.
 `render.yaml` and the workflow in step with the code: health route, port,
 corpora, `RR_INGEST_ON_START` on Render, no secret value committed. The tests
 job checks out grounded-rag at a fixed commit (`GROUNDED_RAG_REF` in the
-workflow), the one the questions are labelled against; bump it after
+workflow), the one the questions are labelled against, and the `Dockerfile`
+builds the same commit (a test checks they agree); bump both after
 `python -m eval.locate_gold` reports nothing missing at the new commit.
+Actions are pinned to commit SHAs.
+
+Python versions: `requirements.txt` holds the supported floors,
+`requirements.lock` the exact versions the image ships (grounded-rag's
+requirements and this project's, resolved together for Python 3.12 on Linux),
+and `requirements-dev.txt` the test tools. After a floor changes (Dependabot
+raises them), regenerate the lock with the command at its top;
+`tests/test_deploy_config.py` fails until the lock satisfies every floor.
 
 ### Deploying
 
 grounded-rag is imported in place (its `rag` package, `config`, `data/` and
 `index/`), so a deployment ships a checkout of it, not a pip package. The
-`Dockerfile` clones it at build time (`--build-arg GROUNDED_RAG_REF=<sha>` to
-pin), builds the UI in a Node stage, and starts uvicorn on `$PORT`.
+`Dockerfile` clones it at build time at a pinned commit (`--build-arg
+GROUNDED_RAG_REF=<sha>` to override), builds the UI in a Node stage, and starts
+uvicorn on `$PORT`.
+
+`/api/ask` spends Groq tokens on every call, so a public deploy needs a guard.
+Both are off by default: `RR_RATE_LIMIT_PER_MINUTE` caps asks per client IP
+over a sliding minute (`render.yaml` sets 6), and `RR_API_KEY` makes callers
+send `X-API-Key` (for an API-only deploy: the bundled UI does not send one).
 
 ```bash
 docker compose --profile local-llm up -d ollama                      # bundled embedder

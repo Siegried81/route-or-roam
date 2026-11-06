@@ -3,8 +3,10 @@
 # Why grounded-rag is cloned into the image: rr/grounded.py imports it in place
 # (its `rag` package, its `config` module, its data/ corpora and its index/),
 # so a deployment needs a checkout of it next to this code, not a pip package.
-# The ref is pinned by build argument so an image is reproducible; bump it on
-# purpose, after re-running the evaluation.
+# The ref is pinned to a commit, the same one CI tests against (a test checks
+# both agree), so an image is reproducible and the GitHub Actions layer cache
+# cannot serve a stale checkout. Bump both on purpose, after
+# `python -m eval.locate_gold` and a re-run of the evaluation.
 #
 # Three stages: the UI is built with Node and only web/dist is kept; Python
 # dependencies are installed before the source so code edits rebuild one cheap
@@ -14,7 +16,9 @@
 FROM node:26-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json* ./
-RUN npm ci --silent 2>/dev/null || npm install --silent
+# npm ci fails on a lock file out of step with package.json, on purpose: a
+# silent fallback to npm install would build unpinned versions.
+RUN npm ci --silent
 COPY web/ ./
 RUN npm run build
 
@@ -22,7 +26,7 @@ RUN npm run build
 FROM python:3.12-slim
 
 ARG GROUNDED_RAG_REPO=https://github.com/Siegried81/grounded-rag
-ARG GROUNDED_RAG_REF=main
+ARG GROUNDED_RAG_REF=68b8b9393ca710f79bb9eaca04d91d31e6ac6cdc
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -41,11 +45,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 
 WORKDIR /app
 
-# Both dependency sets, grounded-rag's first: this project's requirements list
-# only what it adds on top.
-RUN pip install -r /opt/grounded-rag/requirements.txt
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Exact versions from requirements.lock: grounded-rag's requirements and this
+# project's, resolved together for Python 3.12 on Linux. The loose floors in
+# requirements.txt say what is supported; the lock says what is shipped.
+COPY requirements.lock .
+RUN pip install -r requirements.lock
 
 # Unprivileged user. reports/, runs/ and grounded-rag's index/ are written at
 # runtime and live in volumes (see docker-compose.yml).

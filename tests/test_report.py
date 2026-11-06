@@ -94,11 +94,23 @@ def test_paraphrase_set_matches_its_originals():
         assert (q["question"] == src["question"]) == (q["paraphrase_of"] is None)
 
 
-def test_aggregate_pairs_the_two_systems_by_question_and_repeat():
+def test_aggregate_pairs_the_two_systems_by_question_majority_over_repeats():
     paired = report.aggregate(RUNS, QS)["paired"]
-    # a/0 and a/1 both pass; b/0 only the workflow; b/1 neither (injection vs wrong number).
-    assert paired == {"pairs": 4, "both": 2, "only_first": 1, "only_second": 0, "neither": 1,
+    # a: both systems pass 2/2. b: the workflow passes 1/2 (a tie is not a
+    # majority), the agent 0/2, so neither passes b.
+    assert paired == {"pairs": 2, "both": 1, "only_first": 0, "only_second": 0, "neither": 1,
                       "p_value": 1.0}
+
+
+def test_repeats_do_not_multiply_the_paired_evidence():
+    # With the LLM cache on, repeats replay the same answers. Pairing on
+    # (question, repeat) tripled the discordant count: p fell from 0.0625 to 6e-5.
+    qs = [{**QS[0], "id": f"q{i}"} for i in range(5)]
+    runs = [_rec(system, f"q{i}", r, "1" if system == "agent" else "0", 1.0)
+            for system in ("workflow", "agent") for i in range(5) for r in range(3)]
+    paired = report.aggregate(runs, qs)["paired"]
+    assert paired["pairs"] == 5 and paired["only_second"] == 5
+    assert paired["p_value"] == pytest.approx(0.0625)
     assert report.aggregate([r for r in RUNS if r["system"] == "agent"], QS)["paired"] is None
 
 

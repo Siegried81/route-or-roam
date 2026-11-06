@@ -51,7 +51,7 @@ services:
     restart: "no"
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.15
     profiles: ["local-llm"]
     volumes:
       - ollama_models:/root/.ollama

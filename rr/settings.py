@@ -61,6 +61,12 @@ LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "route-or-roam")
 # X-Approve-Token header. An approval is the one action here that writes a
 # file, so it is the one that needs to know who clicked.
 APPROVE_TOKEN = os.getenv("RR_APPROVE_TOKEN", "")
+# /api/ask spends Groq tokens on every call. Both guards are off by default, as
+# in local dev. RR_API_KEY makes callers send X-API-Key (for an API-only
+# deploy: the bundled UI does not send one). RR_RATE_LIMIT_PER_MINUTE caps
+# /api/ask per client IP over a sliding minute; 0 means no limit.
+API_KEY = os.getenv("RR_API_KEY", "")
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RR_RATE_LIMIT_PER_MINUTE", "0"))
 LLM_PROVIDER = os.getenv("RR_LLM_PROVIDER", "groq")  # groq | ollama
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_MODEL = os.getenv("RR_GROQ_MODEL", "openai/gpt-oss-20b")
@@ -89,3 +95,6 @@ EVAL_MODELS = os.getenv("RR_EVAL_MODELS", "")
 MAX_STEPS = int(os.getenv("RR_MAX_STEPS", "8"))       # LLM calls per run
 MAX_TOKENS = int(os.getenv("RR_MAX_TOKENS", "12000"))  # prompt + completion tokens per run
 SEARCH_K = 4
+# Passages per workflow search. The agent chooses its own k (capped at 8 in
+# rr/tools.py); the workflow stays at 4 so its fixed calls fit the token budget.
+WORKFLOW_SEARCH_K = int(os.getenv("RR_WORKFLOW_SEARCH_K", str(SEARCH_K)))

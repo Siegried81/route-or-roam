@@ -126,3 +126,21 @@ def test_search_k_above_the_cap_is_capped_not_rejected(monkeypatch):
     args = tools.SearchArgs(query="net sales", corpus="filings_sections", k=10)
     assert args.capped_k == tools.MAX_SEARCH_K
     tools.SearchArgs(query="q", corpus="filings_sections", k=3)  # below the cap stays valid
+
+
+@pytest.mark.parametrize("expr, expected", [
+    ('days_between("2025-09-27", "2026-08-02")', 309),   # fiscal year end to Annex III date
+    ("days_between('2026-08-02', '2025-09-27')", -309),
+    ('days_between("2024-08-01", "2026-08-02") / 365', 731 / 365),
+])
+def test_calculator_counts_days_between_iso_dates(expr, expected):
+    assert safe_calculate(expr) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("expr", ['days_between("2025-13-01", "2026-01-01")',
+                                  'days_between("27/09/2025", "2026-08-02")',
+                                  'days_between(2025, "2026-08-02")',
+                                  '"2025-09-27"', 'days_between("2025-09-27")'])
+def test_calculator_rejects_bad_dates_and_bare_strings(expr):
+    with pytest.raises(ValueError):
+        safe_calculate(expr)

@@ -11,7 +11,7 @@ A second front end next to the Streamlit app (`app.py`, unchanged). It has two p
 
 ```bash
 # 1. Backend, from the project root (reloads on Python changes)
-.venv/bin/python -m pip install -r requirements.txt            # Windows: .venv/Scripts/python
+.venv/bin/python -m pip install -r requirements.lock -r requirements-dev.txt   # Windows: .venv/Scripts/python
 .venv/bin/python -m uvicorn api.main:app --port 8001 --reload
 
 # 2. Frontend

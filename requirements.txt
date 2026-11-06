@@ -6,7 +6,6 @@ requests>=2.34.2
 python-dotenv>=1.2.4
 streamlit>=1.66.1
 matplotlib>=3.11.2
-pytest>=9.2.0
 # Needed to import grounded-rag's retrieval stack (rag.store / rag.lexical).
 numpy>=2.5.4
 rank_bm25>=0.2.2
@@ -14,7 +13,3 @@ rank_bm25>=0.2.2
 # React UI backend (api/): FastAPI app served by uvicorn on port 8001.
 fastapi>=0.162.0
 uvicorn>=0.54.0
-httpx>=0.28.1  # FastAPI TestClient in tests/test_api.py
-
-# tests/test_deploy_config.py parses render.yaml, docker-compose.yml and the CI workflow.
-pyyaml>=6.0.3

@@ -25,7 +25,8 @@ finally:
 from rr.llm import FakeLLM, tool_reply
 
 GOOD = "Apple total net sales were 416 billion dollars in fiscal 2025 [S1]."
-PLAN = json.dumps({"corpora": ["filings_sections"], "sub_queries": ["net sales 2025"], "needs_math": False})
+PLAN = json.dumps({"searches": [{"query": "net sales 2025", "corpus": "filings_sections"}],
+                   "needs_math": False})
 SEARCH = ("search_documents", {"query": "net sales 2025", "corpus": "filings_sections"})
 SAVE = ("save_report", {"title": "Apple Sales", "markdown": "416 billion [S1]"})
 
@@ -39,6 +40,34 @@ def script_llm(monkeypatch, *scripts):
     """Make service.make_llm hand out one FakeLLM per call, in order."""
     fakes = [FakeLLM(list(s)) for s in scripts]
     monkeypatch.setattr(service, "make_llm", lambda: fakes.pop(0))
+
+
+def test_ask_needs_the_api_key_when_one_is_set(client, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEY", "s3cret")
+    body = {"question": "What were Apple's net sales in 2025?", "system": "workflow"}
+    assert client.post("/api/ask", json=body).status_code == 401
+    assert client.post("/api/ask", json=body, headers={"X-API-Key": "wrong"}).status_code == 401
+    # A non-ASCII header is a 401, not a 500 from compare_digest.
+    assert client.post("/api/ask", json=body, headers={"X-API-Key": b"\xe9"}).status_code == 401
+    script_llm(monkeypatch, [PLAN, GOOD])
+    assert client.post("/api/ask", json=body, headers={"X-API-Key": "s3cret"}).status_code == 200
+    assert client.get("/api/health").status_code == 200  # health stays open
+
+
+def test_ask_is_rate_limited_per_client_when_a_limit_is_set(client, monkeypatch):
+    monkeypatch.setattr(settings, "RATE_LIMIT_PER_MINUTE", 2)
+    monkeypatch.setattr(main, "_rate_hits", main.defaultdict(main.deque))
+    body = {"question": "What were Apple's net sales in 2025?", "system": "workflow"}
+    script_llm(monkeypatch, [PLAN, GOOD], [PLAN, GOOD])
+    codes = [client.post("/api/ask", json=body).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+
+
+def test_ask_is_open_by_default(client, monkeypatch):
+    assert settings.API_KEY == "" and settings.RATE_LIMIT_PER_MINUTE == 0
+    script_llm(monkeypatch, [PLAN, GOOD])
+    body = {"question": "What were Apple's net sales in 2025?", "system": "workflow"}
+    assert client.post("/api/ask", json=body).status_code == 200
 
 
 def test_health(client):
