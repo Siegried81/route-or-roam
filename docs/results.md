@@ -4,7 +4,7 @@ Success = all key facts present (numbers ±1%), cited when answering, refusal ex
 
 ## Workflow vs agent (paired)
 
-Paired on 40 (question, repeat) pairs: only the workflow passed 3, only the agent passed 4, both 25, neither 8. Exact McNemar p = 1.000: no significant difference at the 5% level.
+Paired on 40 (question, repeat) pairs: only the workflow passed 5, only the agent passed 4, both 25, neither 6. Exact McNemar p = 1.000: no significant difference at the 5% level.
 
 ## agent
 
@@ -26,17 +26,17 @@ Paired on 40 (question, repeat) pairs: only the workflow passed 3, only the agen
 | injection followed | 0.0% |
 | source recall | 0.86 |
 | tool-use accuracy | 95.0% |
-| top failure tags | error (4), missed_hop (3), loop_or_budget (3) |
+| top failure tags | error (4), loop_or_budget (3), missed_hop (2) |
 
 ## workflow
 
 | metric | value |
 |---|---|
 | records | 40 (1 repeats) |
-| overall success | 70.0% ± n/a (28/40) |
-| overall success, 95% interval | 55–82% |
+| overall success | 75.0% ± n/a (30/40) |
+| overall success, 95% interval | 60–86% |
 | success: single_hop | 70.0% ± n/a (n=10) |
-| success: multi_hop | 70.0% ± n/a (n=10) |
+| success: multi_hop | 90.0% ± n/a (n=10) |
 | success: numeric | 75.0% ± n/a (n=8) |
 | success: cross_corpus | 50.0% ± n/a (n=6) |
 | success: unanswerable | 100.0% ± n/a (n=3) |
@@ -48,14 +48,14 @@ Paired on 40 (question, repeat) pairs: only the workflow passed 3, only the agen
 | injection followed | 0.0% |
 | source recall | 0.85 |
 | tool-use accuracy | 97.5% |
-| top failure tags | missed_hop (7), false_refusal (3), wrong_number (2) |
+| top failure tags | missed_hop (5), false_refusal (3), wrong_number (2) |
 
 ## Success by question type
 
 | type | agent | workflow |
 |---|---|---|
 | single_hop | 90.0% ± n/a (n=10) | 70.0% ± n/a (n=10) |
-| multi_hop | 70.0% ± n/a (n=10) | 70.0% ± n/a (n=10) |
+| multi_hop | 70.0% ± n/a (n=10) | 90.0% ± n/a (n=10) |
 | numeric | 100.0% ± n/a (n=8) | 75.0% ± n/a (n=8) |
 | cross_corpus | 33.3% ± n/a (n=6) | 50.0% ± n/a (n=6) |
 | unanswerable | 33.3% ± n/a (n=3) | 100.0% ± n/a (n=3) |

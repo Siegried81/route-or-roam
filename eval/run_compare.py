@@ -12,7 +12,11 @@ Why it is built this way:
 - An exception from ``answer_question`` is not a result: it goes to
   runs/dead_letter.jsonl and is NOT written to the runs file, so the next
   resume retries it. A record that comes back with its own ``error`` field is a
-  result (the system failed gracefully) and is kept and scored as such.
+  result (the system failed gracefully) and is kept and scored as such, except
+  a ``TransientLLMError`` (rate limit, 5xx or network failure that outlasted
+  the backoff): it says nothing about the system and would count against the
+  one that makes more calls, so it is parked in the dead letter like an
+  exception and retried on resume.
 - Raw records are stored unscored; ``eval.report`` scores them against
   questions.jsonl, so a scoring fix never requires paying for a re-run.
 - ``rr.run`` is imported lazily so this module (and its tests) load even when
@@ -67,6 +71,10 @@ def load_questions(path: Path = QUESTIONS_PATH, qtype: str | None = None, limit:
     if qtype:
         questions = [q for q in questions if q["type"] == qtype]
     return questions[:limit] if limit else questions
+
+
+#: Prefix ``rr.common.llm_step`` gives a transient failure stored in a record's error.
+INFRA_ERROR_PREFIX = "TransientLLMError"
 
 
 def record_key(system: str, qid: str, repeat: int, run_id: str) -> str:
@@ -217,6 +225,8 @@ def run(
         try:
             record = answer_fn(system, q["question"], run_id=run_id, qid=q["id"], llm=llm,
                                injected_passage=q.get("injected_passage"))
+            if str(record.get("error") or "").startswith(INFRA_ERROR_PREFIX):
+                raise RuntimeError(record["error"])
         except Exception as exc:  # any failure must be parked, not crash the batch
             with lock:
                 stats["failed"] += 1

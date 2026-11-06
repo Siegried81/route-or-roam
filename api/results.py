@@ -20,9 +20,20 @@ RUN_NAME_RE = re.compile(r"^[\w.-]+\.jsonl$")
 MIN_GAP_PP = 2.0
 
 
+def is_run_file(name: str) -> bool:
+    """True for a plain *.jsonl basename that holds run records.
+
+    runs/ also holds the judge's verdicts (<run>.judge.jsonl) and the dead
+    letter of failed attempts; their lines carry qid and system too, so a plain
+    glob would list them and score each line as a failed answer.
+    """
+    return (bool(RUN_NAME_RE.match(name or "")) and not name.startswith(".")
+            and not name.endswith(".judge.jsonl") and name != "dead_letter.jsonl")
+
+
 def safe_run_path(runs_dir: Path, name: str) -> Path | None:
-    """Resolve a run file name inside `runs_dir`; None if the name is not a plain *.jsonl basename."""
-    if not RUN_NAME_RE.match(name or "") or name.startswith("."):
+    """Resolve a run file name inside `runs_dir`; None if it is not a runs file (see `is_run_file`)."""
+    if not is_run_file(name):
         return None
     path = (runs_dir / name).resolve()
     return path if path.parent == runs_dir.resolve() else None
@@ -32,6 +43,8 @@ def list_runs(runs_dir: Path) -> list[dict]:
     """Every runs/*.jsonl file with its size, modification time and complete-line count."""
     out = []
     for path in runs_dir.glob("*.jsonl"):
+        if not is_run_file(path.name):
+            continue
         try:  # a file removed between glob and stat is skipped, not a 500
             st = path.stat()
             records = len(load_runs(path))

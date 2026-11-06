@@ -55,6 +55,20 @@ def test_last_step_is_made_without_tools_and_asks_to_answer_or_refuse():
     assert res["llm_calls"] == settings.MAX_STEPS  # the budget was not extended
 
 
+def test_last_call_comes_before_a_large_turn_overshoots_the_token_budget():
+    # 4000 then 5000 tokens leaves the run at 75% of 12000, under the 80% share,
+    # but a third turn of the same size cannot fit: it must be the tool-less last call.
+    def search(i, size):
+        r = tool_reply(("search_documents", {"query": f"q{i}", "corpus": "filings_sections"}))
+        r.tokens_in, r.tokens_out = size, 1
+        return r
+
+    res, fake = _run([search(0, 3999), search(1, 4999), GOOD])
+    assert fake.requests[-1]["tools"] is None
+    assert "last call" in fake.requests[-1]["messages"][-1]["content"]
+    assert res["answer"] == GOOD and not res["budget_exhausted"]
+
+
 def test_a_tool_call_on_the_last_step_is_dropped_not_run():
     searches = [tool_reply(("search_documents", {"query": f"q{i}", "corpus": "filings_sections"}))
                 for i in range(settings.MAX_STEPS)]

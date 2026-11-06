@@ -166,13 +166,15 @@ class ChatLLM:
         (carrying the provider's own wait), on 5xx or on network failure, and
         LLMError on any other HTTP error.
 
-        Three 400s that the model causes rather than the request are retried
+        Four 400s that the model causes rather than the request are retried
         once with a corrected request, because gpt-oss produces them
         intermittently: Groq rejecting the JSON it generated in JSON mode
         (retried without JSON mode; callers already extract JSON from free
         text), the model calling a tool on a request that offered none (retried
         with an explicit "no tools" instruction), and Groq rejecting a malformed
-        tool call (retried with a reminder of the documented arguments). A
+        tool call (retried with a reminder of the documented arguments). Groq's
+        `output_parse_failed`, a generation it could not split into text and tool
+        calls, is retried the same way with a format reminder. A
         second failure is recorded, so a model that keeps producing bad calls
         still shows up in the evaluation.
         """
@@ -217,6 +219,12 @@ class ChatLLM:
                         "role": "system",
                         "content": "Your last tool call was rejected as malformed. Call only "
                                    "the listed tools, with exactly their documented arguments.",
+                    }]}
+                elif "output_parse_failed" in text:
+                    payload = {**payload, "messages": [*payload["messages"], {
+                        "role": "system",
+                        "content": "Your last reply could not be parsed. Reply with either one "
+                                   "well-formed tool call or the final answer as plain text.",
                     }]}
                 else:
                     raise

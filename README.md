@@ -53,35 +53,43 @@ flowchart LR
 ([full report](docs/results.md)). Rates carry a 95% Wilson interval and the two
 systems are compared with an exact McNemar test on paired answers
 (`eval/stats.py`); with one repeat there is no run-to-run spread to report.
+The same records were re-scored on 6 November 2026 after three labels gained
+their French forms (decisions.md): workflow 28/40 became 30/40, the agent is
+unchanged.
 
 | type (n) | workflow | agent |
 |---|---|---|
 | single_hop (10) | 7/10 | 9/10 |
-| multi_hop (10) | 7/10 | 7/10 |
+| multi_hop (10) | 9/10 | 7/10 |
 | numeric (8) | 6/8 | 8/8 |
 | cross_corpus (6) | 3/6 | 2/6 |
 | unanswerable (3) | 3/3 | 1/3 |
 | injection (3) | 2/3 | 2/3 |
-| **overall** | **28/40 (70%)** | **29/40 (72.5%)** |
-| 95% Wilson interval | 55–82% | 57–84% |
+| **overall** | **30/40 (75%)** | **29/40 (72.5%)** |
+| 95% Wilson interval | 60–86% | 57–84% |
 | avg LLM calls · tokens in/out | 2.55 · 2841/915 | 3.50 · 8208/626 |
 | latency p50 / p95 (s) | 5.0 / 9.5 | 12.6 / 41.2 |
 | injection followed · budget hit | 0% · 0% | 0% · 10% |
 
-Paired on the 40 questions: only the workflow passed 3, only the agent passed 4,
-both 25, neither 8; exact McNemar p = 1.000.
+Paired on the 40 questions: only the workflow passed 5, only the agent passed 4,
+both 25, neither 6; exact McNemar p = 1.000.
 
 **Takeaway:** the two systems are level on accuracy and fail differently. The
 agent is better on single-hop and numeric questions, where it searches again
 when the first passages are thin; the workflow is better at saying "not in the
-documents" (3/3 against 1/3) and on cross-corpus questions. The agent pays for
-its flexibility in cost and robustness: **2.9× the input tokens, 2.5× the median
-latency, a budget hit on 10% of questions**, and four answers lost to the
-provider itself — two outputs Groq could not parse, one tool call while tools
-were disabled, and one request over the free tier's 8,000 tokens-per-minute
-limit as its context grew. Seven discordant pairs out of 40 cannot separate the
-two systems (p = 1.000): no winner is claimed —
-see [what the numbers don't say](docs/technical_deep_dive.md#10-what-the-numbers-do-and-dont-say).
+documents" (3/3 against 1/3), on multi-hop and on cross-corpus questions. The
+agent pays for its flexibility in cost and robustness: **2.9× the input tokens,
+2.5× the median latency, a budget hit on 10% of questions**, and four answers
+lost to the provider itself: two outputs Groq could not parse, one tool call
+while tools were disabled, and one request over the free tier's 8,000
+tokens-per-minute limit as its context grew. Nine discordant pairs out of 40
+cannot separate the two systems (p = 1.000), so no winner is claimed. See
+[what the numbers don't say](docs/technical_deep_dive.md#10-what-the-numbers-do-and-dont-say).
+
+Half of the 23 failures need one date, Article 113 of the AI Act, which is a
+single short chunk that rarely ranks for "when does X apply". All nine AI Act
+questions are asked in French against an English corpus, and the workflow's
+plan sometimes searches in French. Neither failure comes from a wrong label.
 
 **Earlier runs.** On a 17-question set labelled against grounded-rag's former
 four-file AI Act primer, the agent first scored 9/17 against the workflow's
@@ -160,7 +168,7 @@ python -m eval.report --runs runs/m1--groq-openai-gpt-oss-20b.jsonl runs/m1--gro
 python -m eval.judge --runs runs/r1.jsonl --estimate            # opt-in LLM judge: one call per record
 python -m eval.judge --runs runs/r1.jsonl                       # -> runs/r1.judge.jsonl (resumable)
 python -m eval.report --runs runs/r1.jsonl --judge runs/r1.judge.jsonl   # adds the judge rows
-python -m pytest -q                                             # 226 tests, offline
+python -m pytest -q                                             # 242 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`
@@ -240,15 +248,16 @@ their traces and shows an approval modal when the agent asks for `save_report`.
 
 ## Honest limits
 
-- One run of 17 questions on one model: the run-to-run spread is reported as
-  n/a (one repeat), the Wilson interval spans 66–97% for both systems, and the
-  McNemar test has only 4 discordant pairs to work with. 2 to 4 questions per
+- One run of 40 questions on one model: the run-to-run spread is reported as
+  n/a (one repeat), the Wilson intervals span 60–86% and 57–84%, and the
+  McNemar test has only 9 discordant pairs to work with. 3 to 10 questions per
   type. The design target (40 × 2 × 3, cache off) has not been run yet.
-- The published run predates the agent's last-call step and the stricter
-  refusal rule; both change what `budget_exhausted` and `refused` mean for the
-  agent, so it needs a re-run before the unanswerable row is read again. It
-  also predates the relabelling of the AI Act questions against the full
-  regulation (2026-10-11).
+- The published run predates three fixes of 6 November 2026: the agent's
+  last call now comes before a large turn overshoots the token budget, an
+  uncited claim next to the refusal sentence no longer counts as a refusal,
+  and Groq's `output_parse_failed` is retried once. The first and third can
+  only help the agent; the run needs repeating before the agent's budget and
+  error rows are read again.
 - Latency mostly measures free-tier rate-limit waits, not the designs.
 - Scoring is string and number matching; a correct paraphrase can fail. The
   opt-in LLM judge (`eval/judge.py`) flags those cases in extra report rows;

@@ -8,6 +8,7 @@ here, the comparison would no longer be like for like.
 
 from __future__ import annotations
 
+import re
 from typing import TypedDict
 
 from rr import budget as budget_mod
@@ -99,6 +100,25 @@ def as_retrieved(passages: list[dict]) -> list:
             for i, p in enumerate(passages)]
 
 
+def is_refusal(answer: str) -> bool:
+    """True when the answer is grounded-rag's refusal sentence and nothing else.
+
+    The sentence may be in any of grounded-rag's languages (a question asked in
+    French is often refused in French) and may be repeated or padded with
+    spaces. Any other word in the answer is a claim: "Revenue was 416 billion.
+    I couldn't find anything..." asserts a figure, and scoring it as a refusal
+    would pass an unanswerable question on a made-up number. Curly apostrophes
+    are folded to straight ones first, since models often emit them.
+    """
+    text = answer.replace("\u2019", "'")
+    found = False
+    for sentence in grounded.REFUSAL_MESSAGE_SET:
+        if sentence in text:
+            found = True
+            text = text.replace(sentence, "")
+    return found and not re.sub(r"[\W_]+", "", text)
+
+
 def check_answer(answer: str, passages: list[dict]) -> dict:
     """Apply grounded-rag's cite-or-refuse rule and verifier to a draft answer.
 
@@ -112,12 +132,7 @@ def check_answer(answer: str, passages: list[dict]) -> dict:
     # so the stored answer, the UI and the score all see the same citations.
     answer = grounded.gr_answer.normalize_citations(answer)
     report = grounded.verify(answer, as_retrieved(passages))
-    # A refusal is grounded-rag's exact refusal sentence in any of its languages
-    # (a question asked in French is often refused in French), and it cites
-    # nothing: an answer that cites a source after a refusal sentence is making
-    # a claim, so it is scored as an answer, not as a refusal.
-    refused = (not report.valid_citations
-               and any(m in answer for m in grounded.REFUSAL_MESSAGE_SET))
+    refused = not report.valid_citations and is_refusal(answer)
     return {
         "answer": answer,
         "refused": refused,

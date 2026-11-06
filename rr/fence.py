@@ -42,24 +42,38 @@ _MARKER_RE = re.compile("|".join(f"(?:{m})" for m in _MARKERS), re.IGNORECASE)
 _TAG_RE = re.compile(r"<\s*(/?)\s*untrusted_source", re.IGNORECASE)
 
 
+def _fold(ch: str) -> str:
+    """One character as the detectors see it: NFKC form, invisible format characters dropped.
+
+    NFKC keeps zero-width spaces, soft hyphens and word joiners (Unicode
+    category Cf) and the regex class for whitespace does not match them, so a
+    closing tag with a zero-width space after "<" would otherwise close the
+    fence unseen while a model still reads it as a tag.
+    """
+    return "".join(f for f in unicodedata.normalize("NFKC", ch)
+                   if unicodedata.category(f) != "Cf")
+
+
 def scan(text: str) -> list[str]:
     """Return the injection-like phrases found in `text` (empty list = clean).
 
-    Runs on the NFKC form, so fullwidth spellings of a marker are caught as well.
+    Runs on the folded form (see `_fold`), so fullwidth or zero-width-padded
+    spellings of a marker are caught as well.
     """
-    return [m.group(0) for m in _MARKER_RE.finditer(unicodedata.normalize("NFKC", text or ""))]
+    folded = "".join(_fold(ch) for ch in text or "")
+    return [m.group(0) for m in _MARKER_RE.finditer(folded)]
 
 
 def _neutralise(text: str) -> str:
     """Stop a passage from closing or forging the fence by escaping its tag.
 
-    Detection runs on an NFKC-folded copy, character by character, with a map
+    Detection runs on a folded copy (see `_fold`), character by character, with a map
     back to the original offsets; only the matched tag spans are rewritten to
     an inert "&lt;untrusted_source", the rest of the passage stays as retrieved.
     """
     folded, origin = [], []
     for i, ch in enumerate(text):
-        for f in unicodedata.normalize("NFKC", ch):
+        for f in _fold(ch):
             folded.append(f)
             origin.append(i)
     out, last = [], 0

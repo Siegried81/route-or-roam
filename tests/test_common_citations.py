@@ -27,3 +27,26 @@ def test_a_refusal_sentence_followed_by_a_cited_claim_is_an_answer():
             "s'appliquent a partir d'aout 2026 [S1].")
     out = common.check_answer(text, PASSAGES)
     assert not out["refused"] and out["citations"] == ["S1"]
+
+
+def test_an_uncited_claim_before_the_refusal_sentence_is_an_answer():
+    # Scoring it as a refusal would pass an unanswerable question on a made-up figure.
+    out = common.check_answer(f"Revenue was 416 billion. {grounded.REFUSAL_MESSAGE}", PASSAGES)
+    assert not out["refused"]
+
+
+def test_an_out_of_range_citation_does_not_turn_a_claim_into_a_refusal():
+    out = common.check_answer(f"Revenue was 416 billion [S7]. {grounded.REFUSAL_MESSAGE}", PASSAGES)
+    assert not out["refused"]
+
+
+def test_a_refusal_with_curly_apostrophes_counts_as_a_refusal():
+    curly = grounded.REFUSAL_MESSAGE.replace("'", "\u2019")
+    assert curly != grounded.REFUSAL_MESSAGE
+    out = common.check_answer(curly, PASSAGES)
+    assert out["refused"] and out["citations"] == []
+
+
+def test_the_refusal_sentence_alone_with_spacing_still_counts():
+    out = common.check_answer(f"  {grounded.REFUSAL_MESSAGE}\n", PASSAGES)
+    assert out["refused"]
