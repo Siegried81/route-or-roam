@@ -51,10 +51,11 @@ updates:
       docker-majors:
         patterns: ["*"]
         update-types: [major]
-    # The runtime stage stays on python:3.12-slim: 3.15-slim has no zstandard
-    # wheel, so the image build fails. Dependabot reads 3.12 -> 3.15 as a minor
-    # bump and would put it back in the routine group. Remove this once
-    # zstandard publishes a wheel for the newer Python.
+    # python:3.15-slim has no zstandard wheel (pulled in by langsmith), so the
+    # image build fails there; 3.13 and 3.14 have one. Dependabot reads a move
+    # to a newer Python as a minor bump and would put it in the routine group.
+    # A Python bump also needs requirements.lock regenerated for that version.
+    # Remove this once zstandard publishes a wheel for 3.15.
     ignore:
       - dependency-name: python
-        versions: [">=3.13"]
+        versions: [">=3.15"]

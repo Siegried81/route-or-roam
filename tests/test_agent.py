@@ -69,6 +69,21 @@ def test_last_call_comes_before_a_large_turn_overshoots_the_token_budget():
     assert res["answer"] == GOOD and not res["budget_exhausted"]
 
 
+def test_last_call_carries_no_tool_history_but_keeps_passages_and_calculator_results():
+    # A tool-call conversation sent without tools made gpt-oss call a tool anyway,
+    # and Groq rejected the request twice ("Tool choice is none", agent cc03).
+    searches = [tool_reply(("search_documents", {"query": f"q{i}", "corpus": "filings_sections"}))
+                for i in range(settings.MAX_STEPS - 2)]
+    calc = tool_reply(("calculate", {"expression": "416 - 391"}))
+    res, fake = _run(searches + [calc, GOOD])
+    last = fake.requests[-1]["messages"]
+    assert not any(m["role"] == "tool" or m.get("tool_calls") for m in last)
+    body = "\n".join(str(m["content"]) for m in last)
+    assert "<untrusted_source id=S1" in body and "416 - 391 = 25" in body
+    assert "What were Apple's net sales in 2025?" in body and "last call" in body
+    assert res["answer"] == GOOD
+
+
 def test_a_tool_call_on_the_last_step_is_dropped_not_run():
     searches = [tool_reply(("search_documents", {"query": f"q{i}", "corpus": "filings_sections"}))
                 for i in range(settings.MAX_STEPS)]

@@ -1,0 +1,7 @@
+# Test-only dependencies, installed by CI and for local development on top of
+# requirements.txt; the Docker image installs requirements.lock only.
+-r requirements.txt
+pytest>=9.2.0
+httpx>=0.28.1  # FastAPI TestClient in tests/test_api.py
+# tests/test_deploy_config.py parses render.yaml, docker-compose.yml and the CI workflow.
+pyyaml>=6.0.3

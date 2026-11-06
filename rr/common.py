@@ -21,6 +21,12 @@ LOOP_MESSAGE = "I stopped before finishing: the run kept repeating the same tool
 
 CORPUS_LINES = "\n".join(f"- {name}: {desc}" for name, desc in settings.CORPUS_DESCRIPTIONS.items())
 
+# Both corpora are English. Questions often come in French, and gpt-oss then
+# searched in French, which missed the article it needed (sh08, sh09, mh08 on
+# 14 October): BM25 and the embedder rank the English wording far higher.
+QUERY_LANGUAGE_RULE = ("Both corpora are in English: write every search query in English, "
+                       "even when the question is asked in French.")
+
 # grounded-rag's own answer prompt, extended only with what both systems need:
 # the fence rule, the sid naming and an exact refusal sentence we can detect.
 ANSWER_SYSTEM = (

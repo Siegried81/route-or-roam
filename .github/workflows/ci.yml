@@ -7,8 +7,10 @@
 # (no key, no network) and must answer /api/health.
 name: CI
 
+# Pushes to main and every pull request; a PR branch push runs once, as the PR.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -20,8 +22,9 @@ env:
   # 2026-10-11), and a pin keeps a corpus change upstream from turning this CI
   # red on its own. To bump it: check out the new commit next to this repo, run
   # `python -m eval.locate_gold`, relabel what it reports, then change the sha.
-  # The docker job builds from the Dockerfile's default (main): what Render deploys.
-  GROUNDED_RAG_REF: 512e34d395f4703b74a648b9f18e074b225fe36f
+  # The Dockerfile's default ARG is the same commit (tests/test_deploy_config.py
+  # checks it), so the docker job and Render build what the tests ran against.
+  GROUNDED_RAG_REF: 68b8b9393ca710f79bb9eaca04d91d31e6ac6cdc
 
 # A new push to the same branch cancels the run still going for the old commit.
 concurrency:
@@ -32,22 +35,23 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           path: route-or-roam
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           repository: Siegried81/grounded-rag
           path: grounded-rag
           ref: ${{ env.GROUNDED_RAG_REF }}
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
-            route-or-roam/requirements.txt
-            grounded-rag/requirements.txt
-      - run: pip install -r grounded-rag/requirements.txt -r route-or-roam/requirements.txt
+            route-or-roam/requirements.lock
+            route-or-roam/requirements-dev.txt
+      # The locked versions the image ships, plus the test-only tools.
+      - run: pip install -r route-or-roam/requirements.lock -r route-or-roam/requirements-dev.txt
       - run: python -m pytest -q
         working-directory: route-or-roam
 
@@ -57,10 +61,10 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7
         with:
-          node-version: 22
+          node-version: 26  # the Dockerfile's node:26-alpine, so CI builds the UI the image ships
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
@@ -69,7 +73,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - run: docker build -t route-or-roam:ci .
       - name: Smoke test (indexes built with the fake embedder, no key needed)
         run: |

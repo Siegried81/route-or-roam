@@ -17,6 +17,7 @@ import math
 import operator
 import re
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -61,7 +62,8 @@ class ListSectionsArgs(_Args):
 class CalculateArgs(_Args):
     expression: str = Field(min_length=1, max_length=200,
                             description="Arithmetic only, e.g. (416.2 - 391.0) / 391.0 * 100. "
-                                        "No thousands separators, no units.")
+                                        "No thousands separators, no units. For a span of "
+                                        'time: days_between("2025-09-27", "2026-08-02").')
 
 
 class SaveReportArgs(_Args):
@@ -82,7 +84,8 @@ TOOLS: dict[str, ToolSpec] = {
     "search_documents": ToolSpec(SearchArgs, "Search one corpus; returns passages with ids "
                                  "(S1, S2, ...) to cite. An empty result means nothing relevant was found."),
     "list_sections": ToolSpec(ListSectionsArgs, "List the section files of a corpus."),
-    "calculate": ToolSpec(CalculateArgs, "Evaluate an arithmetic expression exactly."),
+    "calculate": ToolSpec(CalculateArgs, "Evaluate an arithmetic expression exactly, "
+                           "including days between two dates."),
     "save_report": ToolSpec(SaveReportArgs, "Save a markdown report to disk. Only when the user "
                             "asks for a report; a human must approve it.", needs_approval=True),
 }
@@ -111,8 +114,28 @@ _FUNCS = {"abs": abs, "round": round, "min": min, "max": max}
 MAX_POWER_DIGITS = 30
 
 
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _days_between(args: list) -> int:
+    """Days from the first ISO date to the second (negative if it is earlier).
+
+    Deadline questions ("how long between the fiscal year end and the date the
+    high-risk rules apply") need date arithmetic, and a model counting days by
+    hand gets it wrong. Only two literal "YYYY-MM-DD" strings are accepted, so
+    strings stay impossible anywhere else in an expression.
+    """
+    if len(args) != 2 or not all(isinstance(a, ast.Constant) and isinstance(a.value, str)
+                                 and _ISO_DATE_RE.fullmatch(a.value) for a in args):
+        raise ValueError('days_between takes two dates written "YYYY-MM-DD"')
+    start, end = (date.fromisoformat(a.value) for a in args)
+    return (end - start).days
+
+
 def safe_calculate(expression: str) -> float:
     """Evaluate +, -, *, /, //, %, ** and abs/round/min/max over numbers; reject anything else.
+
+    One function takes strings: days_between("YYYY-MM-DD", "YYYY-MM-DD").
 
     Exponents are capped at 100 so a request like 9**9**9 cannot hang the run.
     That cap alone does not bound nested powers: ((9**99)**99)**99 keeps every
@@ -135,6 +158,9 @@ def safe_calculate(expression: str) -> float:
             return _BINOPS[type(node.op)](left, right)
         if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY:
             return _UNARY[type(node.op)](ev(node.operand))
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "days_between" and not node.keywords):
+            return _days_between(node.args)
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in _FUNCS and not node.keywords):
             return _FUNCS[node.func.id](*[ev(a) for a in node.args])

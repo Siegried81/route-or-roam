@@ -5,7 +5,8 @@ from rr.common import BUDGET_MESSAGE
 from rr.llm import ChatResponse, FakeLLM, LLMError
 from rr.run import answer_question
 
-PLAN = '{"corpora": ["filings_sections"], "sub_queries": ["net sales 2025"], "needs_math": false}'
+PLAN = ('{"searches": [{"query": "net sales 2025", "corpus": "filings_sections"}], '
+        '"needs_math": false}')
 GOOD = "Apple total net sales were 416 billion dollars in fiscal 2025 [S1]."
 
 
@@ -38,9 +39,44 @@ def test_verify_failure_gets_exactly_one_retry():
 
 def test_math_path_uses_calculator():
     plan = PLAN.replace("false", "true")
-    res, fake = _run([plan, '{"expression": "416 - 391"}', GOOD])
+    res, fake = _run([plan, '{"expressions": ["416 - 391"]}', GOOD])
     assert [c["name"] for c in res["tool_calls"]] == ["search_documents", "calculate"]
     assert "Calculator result (exact): 416 - 391 = 25" in fake.requests[2]["messages"][1]["content"]
+
+
+def test_several_expressions_and_a_date_span_are_all_computed_in_one_call():
+    # A percentage change needs the difference and the ratio; with one expression
+    # the model rounded the ratio by hand (nu01, nu03 on 14 October).
+    plan = PLAN.replace("false", "true")
+    exprs = ('{"expressions": ["416161 - 391035", "(416161 - 391035) / 391035 * 100", '
+             '"days_between(\\"2025-09-27\\", \\"2026-08-02\\")"]}')
+    res, fake = _run([plan, exprs, GOOD])
+    assert [c["name"] for c in res["tool_calls"]] == ["search_documents"] + ["calculate"] * 3
+    prompt = fake.requests[2]["messages"][1]["content"]
+    assert "= 25126" in prompt and "= 6.42551" in prompt and "= 309" in prompt
+    assert res["llm_calls"] == 3
+
+
+def test_a_failing_expression_is_traced_and_the_others_still_reach_the_answer():
+    plan = PLAN.replace("false", "true")
+    res, fake = _run([plan, '{"expressions": ["416 - 391", "open(1)"]}', GOOD])
+    assert [c["ok"] for c in res["tool_calls"][1:]] == [True, False]
+    prompt = fake.requests[2]["messages"][1]["content"]
+    assert prompt.count("Calculator result (exact)") == 1
+
+
+def test_plan_and_agent_prompts_ask_for_english_queries():
+    from rr import agent, workflow
+
+    for prompt in (workflow.PLAN_SYSTEM, agent.AGENT_SYSTEM):
+        assert "write every search query in English" in prompt
+        assert "French corpus" not in prompt
+
+
+def test_workflow_search_depth_is_configurable(monkeypatch):
+    monkeypatch.setattr(settings, "WORKFLOW_SEARCH_K", 7)
+    res, _ = _run([PLAN, GOOD])
+    assert res["tool_calls"][0]["args"]["k"] == 7
 
 
 def test_no_passages_refuses_without_answer_call(monkeypatch):
@@ -50,7 +86,7 @@ def test_no_passages_refuses_without_answer_call(monkeypatch):
 
 
 def test_invalid_plan_falls_back_to_all_corpora():
-    res, _ = _run(['{"corpora": ["wikipedia"]}', GOOD])
+    res, _ = _run(['{"searches": [{"query": "x", "corpus": "wikipedia"}]}', GOOD])
     searches = [c["args"]["corpus"] for c in res["tool_calls"]]
     assert searches == list(settings.CORPORA) and res["error"] is None
 
@@ -66,7 +102,7 @@ def test_model_failure_is_recorded_not_raised():
     assert "HTTP 401" in res["error"] and res["answer"] == ""
 
 
-def test_search_retrieves_sub_queries_in_parallel_and_registers_in_plan_order(monkeypatch):
+def test_search_runs_planned_searches_in_parallel_and_registers_in_plan_order(monkeypatch):
     import threading
 
     # conftest turns time.sleep into a no-op, so overlap is forced with a barrier:
@@ -83,13 +119,12 @@ def test_search_retrieves_sub_queries_in_parallel_and_registers_in_plan_order(mo
         return [grounded.Retrieved(chunk, 0.8)]
 
     monkeypatch.setattr(grounded, "search_corpus", concurrent)
-    plan = ('{"corpora": ["filings_sections", "ai_act_sections"], '
-            '"sub_queries": ["net sales 2025", "haut risque"], "needs_math": false}')
+    plan = ('{"searches": [{"query": "net sales 2025", "corpus": "filings_sections"}, '
+            '{"query": "high-risk obligations", "corpus": "ai_act_sections"}], "needs_math": false}')
     res, _ = _run([plan, GOOD])
-    # Registered in plan order (corpus-major), exactly as a sequential run would.
+    # Each query goes only to its own corpus, registered in plan order.
     assert [(c["args"]["corpus"], c["args"]["query"]) for c in res["tool_calls"]] == [
-        ("filings_sections", "net sales 2025"), ("filings_sections", "haut risque"),
-        ("ai_act_sections", "net sales 2025"), ("ai_act_sections", "haut risque")]
+        ("filings_sections", "net sales 2025"), ("ai_act_sections", "high-risk obligations")]
     assert res["sources_searched"] == ["05_mdna.txt", "02_timeline.txt"]
     assert len({tid for _, tid in seen}) > 1  # more than one thread did the retrieving
 

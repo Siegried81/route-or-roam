@@ -10,7 +10,7 @@ KEYS = {"run_id": str, "system": str, "qid": str, "answer": str, "citations": li
         "sources_searched": list, "tool_calls": list, "llm_calls": int, "tokens_in": int,
         "tokens_out": int, "latency_s": float, "refused": bool, "budget_exhausted": bool,
         "injection_flags": int, "hallucinated_tools": int, "error": (str, type(None))}
-PLAN = '{"corpora": ["filings_sections"], "sub_queries": ["net sales"], "needs_math": false}'
+PLAN = '{"searches": [{"query": "net sales", "corpus": "filings_sections"}], "needs_math": false}'
 GOOD = "Apple total net sales were 416 billion dollars in fiscal 2025 [S1]."
 SCRIPTS = {
     "workflow": lambda: [PLAN, GOOD],

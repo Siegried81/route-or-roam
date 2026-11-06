@@ -32,3 +32,7 @@ services:
         sync: false
       - key: RR_APPROVE_TOKEN
         generateValue: true
+      # /api/ask spends the Groq keys: cap it. Render's proxy hides client IPs
+      # from uvicorn, so this is one shared budget per minute for all callers.
+      - key: RR_RATE_LIMIT_PER_MINUTE
+        value: "6"

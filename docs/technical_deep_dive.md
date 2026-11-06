@@ -68,16 +68,28 @@ flowchart LR
     answer -. budget / error .-> stop
 ```
 
-- **plan**: one JSON-mode call returning a `Plan` (1 to 2 corpora, 1 to 3
-  sub-queries in the corpus language, `needs_math`). The model is validated with
-  `extra="forbid"`; an invalid plan is not repaired but replaced by a safe
-  fallback (the question itself, every corpus, no math), recorded as
-  `fallback: true`.
-- **search**: code runs every sub-query against every planned corpus with
-  `k=4`, through the shared `run_tool`.
+- **plan**: one JSON-mode call returning a `Plan`: 1 to 4 searches, each a
+  query with the one corpus it goes to, and `needs_math`. Queries are written
+  in English even for a French question (both corpora are English; French
+  queries missed the article sh08, sh09 and mh08 needed). The model is
+  validated with `extra="forbid"`; an invalid plan is not repaired but replaced
+  by a safe fallback (the question itself, against each corpus, no math),
+  recorded as `fallback: true`. Before 6 November 2026 the plan listed corpora
+  and queries separately and every query went to every corpus, which spent
+  half of a cross-corpus question's searches on the wrong corpus.
+- **search**: code runs each planned search with `k=4`
+  (`RR_WORKFLOW_SEARCH_K`), through the shared `run_tool`. The agent picks its
+  own `k` (it chose 8 on 68 of its 87 searches on 14 October). The workflow
+  stays at 4 because each of its calls carries every passage: 4 searches at
+  k=8 would overrun the 12k-token budget and Groq's 8k-token free-tier request
+  limit. This is a real difference in retrieval depth, paid for by the agent
+  in tokens; the knob lets a run test the workflow at k=8.
 - **calculate**: only when the plan says so and passages exist. The model
-  writes one expression over the fenced sources; the safe calculator evaluates
-  it.
+  writes 1 to 3 expressions over the fenced sources in one call (a percentage
+  change needs the difference and the ratio; with one expression the model
+  rounded the ratio by hand, wrongly, on nu01 and nu03), and the safe
+  calculator evaluates each. `days_between("YYYY-MM-DD", "YYYY-MM-DD")` covers
+  deadline questions (cc06).
 - **answer**: grounded answer from the fenced passages (plus the exact
   calculator result). No passages means the refusal sentence, without a call.
 - **verify**: grounded-rag's verifier; a failure earns exactly one retry with
@@ -510,7 +522,7 @@ model, and a model comparison would need its own pairing (same system, same
 question, two models), which is not built. Without `--models` nothing changes:
 one file `runs/<run_id>.jsonl` with the configured model.
 
-`--workers N` runs N calls at a time, each worker pinned to one Groq key (N is capped at the number of keys), so parallel calls never share a per-key rate limit. Each record still stores its own wall-clock latency, measured inside `answer_question` exactly as with one worker: only the batch finishes sooner. Inside one workflow run, the search node also fetches its 1 to 6 retrieval calls in parallel (local embeddings, no quota) and registers them in plan order, so the sids, the trace and the counts are those of a sequential run; the LLM calls of a run stay sequential, because each depends on the previous one.
+`--workers N` runs N calls at a time, each worker pinned to one Groq key (N is capped at the number of keys), so parallel calls never share a per-key rate limit. Each record still stores its own wall-clock latency, measured inside `answer_question` exactly as with one worker: only the batch finishes sooner. Inside one workflow run, the search node also fetches its 1 to 4 retrieval calls in parallel (local embeddings, no quota) and registers them in plan order, so the sids, the trace and the counts are those of a sequential run; the LLM calls of a run stay sequential, because each depends on the previous one.
 
 ### 8.6 Spread, intervals and the paired test (`eval/stats.py`)
 
@@ -531,7 +543,11 @@ different questions:
 - **Workflow vs agent**: both systems answer the **same** questions, so their
   outcomes are paired, and an unpaired test (two-proportion z, chi-square on the
   totals) would throw that pairing away. The report runs an **exact McNemar
-  test** on `(question, repeat)` pairs: only discordant pairs (one system
+  test** on questions, a question counting as passed when it passed in a
+  strict majority of its repeats. Pairing on `(question, repeat)` counted one
+  question once per repeat, and with the LLM cache on the repeats are
+  byte-identical replays: 5 discordant questions over 3 cached repeats gave
+  p = 6e-5 instead of 0.0625. Only discordant pairs (one system
   passes, the other fails) carry information; under "no difference" each is a
   fair coin, so the p-value is an exact binomial tail. The exact form is used
   because the chi-square version needs far more discordant pairs than a 17 to
@@ -757,7 +773,7 @@ by construction.
   words (a regulation described but not named) fails as `missed_hop`. The
   opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
   change it, and it is itself a model: its verdicts are a second opinion.
-- Real runs need grounded-rag's indexes and embedder; the tests (242, offline,
+- Real runs need grounded-rag's indexes and embedder; the tests (262, offline,
   scripted LLM, retrieval mocked) do not.
 
 ## 13. Roadmap

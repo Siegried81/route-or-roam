@@ -24,18 +24,19 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from rr import budget as budget_mod
+from rr import fence
 from rr import grounded
 from rr import guard as guard_mod
 from rr import settings
-from rr.common import (ANSWER_SYSTEM, CORPUS_LINES, RunState, check_answer, initial_state,
-                       llm_step, record_tool, stop_updates, verify_feedback)
+from rr.common import (ANSWER_SYSTEM, CORPUS_LINES, QUERY_LANGUAGE_RULE, RunState, check_answer,
+                       initial_state, llm_step, record_tool, stop_updates, verify_feedback)
 from rr.tools import TOOLS, ToolResult, run_tool, tool_schemas
 
 AGENT_SYSTEM = (
     f"{ANSWER_SYSTEM}\n\n"
     f"You can call tools to find sources. Corpora:\n{CORPUS_LINES}\n"
-    "Search before answering; search the French corpus in French. Use calculate for any "
-    "arithmetic. Call save_report only if the user explicitly asks for a saved report. "
+    f"Search before answering. {QUERY_LANGUAGE_RULE} Use calculate for any arithmetic, "
+    "including days between dates. Call save_report only if the user explicitly asks for a saved report. "
     "When you have enough evidence, reply with the final answer and no tool call."
 )
 
@@ -49,6 +50,29 @@ BLOCKED_OUTPUT = ("Duplicate call blocked: you already received this exact resul
                   "try a different query, or give your final answer.")
 
 
+def _last_call_messages(state: RunState) -> list[dict]:
+    """The prompt for the agent's tool-less last call: passages, calculator results, question.
+
+    Sending the tool-call conversation without tools made gpt-oss call a tool
+    anyway, and Groq rejected the request twice ("Tool choice is none, but
+    model called a tool", agent cc03 on 14 October). So the last call is built
+    the way the workflow's answer step is: the same system prompt, every
+    passage fenced, the calculator results and the question. The agent keeps
+    all the evidence it gathered; it only loses its own search chatter.
+    """
+    names = {c["id"]: c["function"]["name"]
+             for m in state["messages"] for c in m.get("tool_calls") or []}
+    calc = [m["content"] for m in state["messages"]
+            if m["role"] == "tool" and names.get(m.get("tool_call_id")) == "calculate"
+            and not str(m["content"]).startswith(("Tool error", "Duplicate call"))]
+    user = f"{fence.fence_all(state['passages'])}\n\n" if state["passages"] else ""
+    user += "".join(f"Calculator result (exact): {c}\n" for c in calc)
+    user += f"\nQuestion: {state['question']}"
+    return [{"role": "system", "content": ANSWER_SYSTEM},
+            {"role": "user", "content": user.lstrip()},
+            {"role": "system", "content": LAST_CALL_INSTRUCTION}]
+
+
 def build_agent(llm, checkpointer=None):
     """Compile the agent graph around `llm`; pass a checkpointer to allow interrupt/resume."""
     schemas = tool_schemas()
@@ -60,13 +84,13 @@ def build_agent(llm, checkpointer=None):
         a last-call instruction, so the agent ends with an answer or a refusal
         instead of being cut off mid-search. The workflow has the same guarantee
         by construction (its last node always answers), so this aligns the two
-        systems rather than favouring one. The instruction is sent but not kept
-        in the stored messages, which stay the model's own conversation.
+        systems rather than favouring one. The last call's prompt is rebuilt
+        from the evidence (see `_last_call_messages`) and is not kept in the
+        stored messages, which stay the model's own conversation.
         """
         last_call = budget_mod.nearly_exhausted(state["budget"])
         if last_call:
-            resp, upd = llm_step(llm, state, state["messages"] + [
-                {"role": "system", "content": LAST_CALL_INSTRUCTION}])
+            resp, upd = llm_step(llm, state, _last_call_messages(state))
         else:
             resp, upd = llm_step(llm, state, state["messages"], tools=schemas, tool_choice="auto")
         if resp is None:

@@ -4,7 +4,7 @@ Success = all key facts present (numbers ±1%), cited when answering, refusal ex
 
 ## Workflow vs agent (paired)
 
-Paired on 40 (question, repeat) pairs: only the workflow passed 5, only the agent passed 4, both 25, neither 6. Exact McNemar p = 1.000: no significant difference at the 5% level.
+Paired on 40 questions (majority over repeats): only the workflow passed 5, only the agent passed 4, both 25, neither 6. Exact McNemar p = 1.000: no significant difference at the 5% level.
 
 ## agent
 

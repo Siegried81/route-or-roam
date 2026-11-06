@@ -22,8 +22,11 @@ Why it is built this way:
   every rate. Repeats of one question are not independent, so with several
   repeats this interval is optimistic; it is a floor on the uncertainty.
 - Workflow and agent answer the same questions, so they are compared with an
-  exact McNemar test on (question, repeat) pairs (see eval/stats.py), not by
-  eyeballing the gap between two rates.
+  exact McNemar test (see eval/stats.py), not by eyeballing the gap between two
+  rates. The unit is the question: with several repeats a question counts as
+  passed when it passed in a strict majority of them. Pairing on (question,
+  repeat) would count one question three times, and with the LLM cache on
+  the repeats are byte-identical replays, so p-values came out far too small.
 - Latency uses nearest-rank percentiles (p50/p95), no interpolation, so every
   reported value is a latency that actually happened.
 - matplotlib is optional: without it the markdown is still written and the
@@ -150,7 +153,10 @@ def aggregate(runs: list[dict], questions: list[dict], verdicts: dict[str, dict]
         for rec, q, s in items:
             overall[rec.get("repeat", 0)].append(s["passed"])
             by_type[q["type"]][rec.get("repeat", 0)].append(s["passed"])
-        outcomes[system] = {(rec["qid"], rec.get("repeat", 0)): s["passed"] for rec, _, s in items}
+        per_question: dict[str, list[bool]] = defaultdict(list)
+        for rec, _, s in items:
+            per_question[rec["qid"]].append(s["passed"])
+        outcomes[system] = {qid: sum(v) > len(v) / 2 for qid, v in per_question.items()}
         injected = [s["injection_followed"] for rec, q, s in items if q.get("injected_passage")]
         tags = Counter(s["failure_tag"] for _, _, s in items if s["failure_tag"])
         n = len(items)
@@ -176,8 +182,8 @@ def aggregate(runs: list[dict], questions: list[dict], verdicts: dict[str, dict]
         }
         if verdicts is not None:
             out["systems"][system]["judge"] = judge_summary(items, verdicts)
-    # Paired comparison on the (question, repeat) pairs both systems answered;
-    # "first" is the workflow, "second" the agent.
+    # Paired comparison on the questions both systems answered (majority over
+    # repeats); "first" is the workflow, "second" the agent.
     out["paired"] = (paired_outcomes(outcomes["workflow"], outcomes["agent"])
                      if {"workflow", "agent"} <= outcomes.keys() else None)
     return out
@@ -223,7 +229,7 @@ def paired_sentence(paired: dict | None) -> str | None:
     b, c, p = paired["only_first"], paired["only_second"], paired["p_value"]
     verdict = ("a significant difference at the 5% level" if p < 0.05
                else "no significant difference at the 5% level")
-    return (f"Paired on {paired['pairs']} (question, repeat) pairs: only the workflow passed {b}, "
+    return (f"Paired on {paired['pairs']} questions (majority over repeats): only the workflow passed {b}, "
             f"only the agent passed {c}, both {paired['both']}, neither {paired['neither']}. "
             f"Exact McNemar p = {p:.3f}: {verdict}.")
 

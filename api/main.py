@@ -12,12 +12,15 @@ UI is served from `/` so one process is enough in production.
 
 from __future__ import annotations
 
+import hmac
+import logging
+import secrets
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Literal, Optional
 
-import secrets
-
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
@@ -31,7 +34,7 @@ WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 app = FastAPI(title="route-or-roam API", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5181", "http://127.0.0.1:5181"],
-                   allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Approve-Token"])
+                   allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Approve-Token", "X-API-Key"])
 
 # Hosts a request may come from and still count as "this machine". Starlette's
 # TestClient reports "testclient", which is the suite running on this machine.
@@ -54,6 +57,57 @@ def _approver(request: Request, token: Optional[str]) -> str:
     if host not in _LOCAL_HOSTS:
         raise HTTPException(403, "approval from another machine needs RR_APPROVE_TOKEN to be set")
     return f"local:{host}"
+
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
+    """401 unless the X-API-Key header matches settings.API_KEY; no check when it is unset.
+
+    Compared as utf-8 bytes: hmac.compare_digest raises TypeError on a
+    non-ASCII str, and Starlette decodes headers as latin-1, so a stray
+    "X-API-Key: \u00e9" would otherwise be a 500 instead of a 401.
+    """
+    if settings.API_KEY and not hmac.compare_digest(
+            (x_api_key or "").encode("utf-8"), settings.API_KEY.encode("utf-8")):
+        raise HTTPException(401, "missing or invalid X-API-Key header")
+
+
+_RATE_WINDOW_S = 60.0
+_RATE_SWEEP_EVERY = 1000
+_rate_hits: dict[str, deque] = defaultdict(deque)
+_rate_calls = 0
+
+
+def rate_limit(request: Request) -> None:
+    """429 once a client IP made RATE_LIMIT_PER_MINUTE asks in the last 60 s; off at 0.
+
+    A sliding window per IP. A rejected request is not recorded, and every
+    _RATE_SWEEP_EVERY accepted calls idle clients are dropped, so the store does
+    not grow with every IP that ever called. Behind a proxy that hides client
+    IPs (uvicorn without --proxy-headers) every caller shares one bucket, which
+    still caps the spend on the Groq keys.
+    """
+    global _rate_calls
+    limit = settings.RATE_LIMIT_PER_MINUTE
+    if limit <= 0:
+        return
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    hits = _rate_hits[ip]
+    while hits and now - hits[0] >= _RATE_WINDOW_S:
+        hits.popleft()
+    if len(hits) >= limit:
+        raise HTTPException(429, "rate limit exceeded; try again in a minute")
+    hits.append(now)
+    _rate_calls += 1
+    if _rate_calls % _RATE_SWEEP_EVERY == 0:
+        for stale in [k for k, v in _rate_hits.items() if not v or now - v[-1] >= _RATE_WINDOW_S]:
+            del _rate_hits[stale]
+
+
+if not settings.API_KEY and settings.RATE_LIMIT_PER_MINUTE <= 0:
+    logging.getLogger("rr.api").warning(
+        "RR_API_KEY and RR_RATE_LIMIT_PER_MINUTE are unset: /api/ask is open and spends "
+        "Groq tokens for any caller. Set one of them before a public deploy.")
 
 
 class AskRequest(BaseModel):
@@ -106,7 +160,7 @@ def config() -> dict:
     }
 
 
-@app.post("/api/ask")
+@app.post("/api/ask", dependencies=[Depends(require_api_key), Depends(rate_limit)])
 def ask(req: AskRequest) -> dict:
     """Run the question; an agent paused on save_report comes back as awaiting_approval.
 
