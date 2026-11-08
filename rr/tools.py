@@ -173,6 +173,19 @@ def safe_calculate(expression: str) -> float:
     return ev(tree)
 
 
+def format_result(value) -> str:
+    """A calculator result as both systems show it to the model: in full, never in e-notation.
+
+    The answer prompt labels it "exact", so a whole number is printed with all
+    its digits (1248483, not 1.24848e+06) and a fraction with 12 significant
+    digits, enough that rounding to one decimal is left to the model on a
+    value that is right.
+    """
+    if isinstance(value, int) or (isinstance(value, float) and value.is_integer() and abs(value) < 1e15):
+        return str(int(value))
+    return format(value, ".12g")
+
+
 # --- execution -----------------------------------------------------------------
 @dataclass
 class ToolResult:
@@ -261,7 +274,7 @@ def run_tool(name: str, raw_args: dict, passages: list[dict], *,
         if name == "list_sections":
             return ToolResult(True, "\n".join(grounded.list_corpus_sections(args.corpus)) or "(none)")
         if name == "calculate":
-            return ToolResult(True, f"{args.expression} = {safe_calculate(args.expression):g}")
+            return ToolResult(True, f"{args.expression} = {format_result(safe_calculate(args.expression))}")
         if name == "save_report":
             settings.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
             path = settings.REPORTS_DIR / f"{_slug(args.title)}.md"

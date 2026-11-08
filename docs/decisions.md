@@ -219,3 +219,38 @@ One dated entry per change that alters what the system promises. Append, never r
 - **What changes in the numbers:** citation counts can only go up (one stored
   agent answer, sh08, cites in parentheses). `eval.locate_gold` reports nothing
   missing at e378805; 262 tests pass against it.
+
+## 2026-11-08: Second audit, six live fixes
+
+- **Stored rate-limit errors are left out (`eval/report.py`, `api/results.py`):**
+  `run_compare` stopped writing `TransientLLMError` records on 6 November, but
+  `live1.jsonl` and `live2.jsonl` still hold 50 and 7 of them, and the report
+  and the Results tab scored each as a failure. They are now counted in
+  `infra_errors`, left out of every rate and average, and the count is printed.
+  - **What changes in the numbers:** live1 goes from workflow 2/32 and agent
+    2/32 (6.2% each) to 2/9 and 2/5; its average LLM calls stop counting
+    zero-call quota records. The published `r120e` report is byte-identical.
+- **Cached repeats (`eval/report.py`):** with the LLM cache on, repeat 1 and
+  later replay repeat 0, so the spread across repeats was 0.0 by construction
+  and printed as "± 0.0". It is now n/a, with a note, and the Wilson interval
+  counts questions (strict majority over repeats, as McNemar already does)
+  instead of records. For 40 questions × 3 cached repeats at 75% the interval
+  widens from 67-82% to 60-86%. Cache-off runs and one-repeat runs are unchanged.
+- **Loop stops are tagged `loop_or_budget` (`rr/common.py`, `eval/score.py`):**
+  a run the guard ends for repeating a call has `budget_exhausted` false, so it
+  fell through to `missed_hop` or `uncited`. Records now carry `stop_reason`,
+  and the tag also applies when it is `loop`. Pass/fail is unchanged; only the
+  failure tag moves. No stored record has a loop stop.
+- **Judge estimate (`eval/judge.py`):** errored records were listed as pending,
+  so `--estimate` counted them as LLM calls (80 instead of 76 on `r120e`,
+  64 instead of 10 on `live1`) and every resume logged them as judge errors
+  again. They are no longer pending. Verdicts and judged rates are unchanged.
+- **Calculator output (`rr/tools.py::format_result`):** results were printed
+  with `:g`, six significant digits with e-notation from a million up
+  (`416161 * 3 = 1.24848e+06`), next to a prompt calling them exact. Whole
+  numbers are now printed in full and fractions with 12 significant digits.
+  This changes the prompts of calculator questions, so cached replies for
+  them no longer match; no stored record held a value over a million.
+- **Agent last call (`rr/agent.py`):** a calculate call rejected for invalid
+  arguments was handed to the last call as "Calculator result (exact): Invalid
+  arguments: ...". Only calls that ran are passed on now.

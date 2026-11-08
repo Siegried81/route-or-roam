@@ -185,6 +185,7 @@ def to_result(state: RunState, *, run_id: str, system: str, qid: str, latency_s:
         "latency_s": round(latency_s, 3),
         "refused": bool(state.get("refused")),
         "budget_exhausted": state.get("stop_reason") in ("max_steps", "max_tokens"),
+        "stop_reason": state.get("stop_reason"),
         "injection_flags": fence.count_flags(passages),
         "hallucinated_tools": int(state.get("hallucinated_tools") or 0),
         "error": state.get("error"),

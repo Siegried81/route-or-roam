@@ -124,9 +124,15 @@ def judge_record(question: dict, record: dict, llm) -> dict:
 
 
 def pending_records(runs: list[dict], questions: list[dict], verdicts: dict[str, dict]) -> list[dict]:
-    """Records still to judge: known qid, a key, and no valid verdict yet."""
+    """Records still to judge: known qid, a key, no ``error`` and no valid verdict yet.
+
+    An errored record has no answer, so it never gets a verdict; keeping it
+    pending would count it as an LLM call in ``--estimate`` and log it as a
+    judge error again on every resume.
+    """
     known = {q["id"] for q in questions}
     return [r for r in runs if r.get("qid") in known and r.get("key")
+            and r.get("error") in (None, "")
             and (verdicts.get(r["key"]) or {}).get("verdict") is None]
 
 

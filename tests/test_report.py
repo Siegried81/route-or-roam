@@ -156,3 +156,44 @@ def test_png_written_when_matplotlib_available(tmp_path):
     png = tmp_path / "chart.png"
     report.build_report(runs, qfile, tmp_path / "results.md", png)
     assert png.exists() and png.stat().st_size > 0
+
+
+def test_a_stored_rate_limit_error_is_left_out_not_scored_as_a_failure():
+    """Runs written before run_compare parked TransientLLMError records still hold them.
+
+    A 429 says nothing about the system, so it must not count against it, and
+    its zero calls and tokens must not dilute the cost averages either.
+    """
+    quota = _rec("agent", "a", 2, "", 0.5, llm_calls=0, tokens_in=0, tokens_out=0,
+                 citations=[], error="TransientLLMError: rate-limited on every configured key (429)")
+    model = _rec("agent", "a", 3, "", 0.5, citations=[], error="LLMError: HTTP 400: bad tool call")
+    agg = report.aggregate(RUNS + [quota, model], QS)
+    ag = agg["systems"]["agent"]
+    assert agg["infra_errors"] == 1
+    assert ag["n"] == 5 and ag["passed"] == 2  # the model error is still scored, as a failure
+    assert ag["llm_calls"] == pytest.approx((6 + 2 + 2 + 2 + 2) / 5)
+    md = report.render_markdown(agg, "x.jsonl", "")
+    assert "1 record(s) left out: rate limit or provider outage" in md
+
+
+def test_cached_repeats_show_no_spread_instead_of_a_reassuring_zero():
+    """With the LLM cache on, repeats replay the first answer byte for byte.
+
+    Their spread is 0.0 by construction, which would read as "perfectly
+    stable"; like a single repeat, it is not observable and must be n/a.
+    """
+    runs = [_rec("workflow", "a", r, "1", 1.0, llm_cache=True) for r in range(3)]
+    runs += [_rec("workflow", "b", r, "nope", 1.0, llm_cache=True) for r in range(3)]
+    agg = report.aggregate(runs, QS)
+    wf = agg["systems"]["workflow"]
+    assert wf["overall"] == (0.5, None, 3)
+    assert wf["by_type"]["single_hop"] == (1.0, None, 3)
+    assert agg["cached_repeats"] is True
+    # The interval counts the 2 questions, not 6 replayed records.
+    assert wf["wilson"] == report.wilson(1, 2)
+    md = report.render_markdown(agg, "x.jsonl", "")
+    assert "± 0.0" not in md and "LLM cache was on" in md
+    # Cache off: the spread is observed and kept.
+    live = [{**r, "llm_cache": False} for r in runs]
+    live_wf = report.aggregate(live, QS)["systems"]["workflow"]
+    assert live_wf["overall"][1] == 0.0 and live_wf["wilson"] == report.wilson(3, 6)

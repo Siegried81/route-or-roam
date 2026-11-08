@@ -155,7 +155,8 @@ approve=)` always returns the same flat dict:
 ```
 run_id, system, qid, answer, citations [sid], sources_searched [file],
 tool_calls [{name, args, ok, error}], llm_calls, tokens_in, tokens_out,
-latency_s, refused, budget_exhausted, injection_flags, hallucinated_tools, error
+latency_s, refused, budget_exhausted, stop_reason, injection_flags,
+hallucinated_tools, error
 ```
 
 It never raises for model or tool failures. Each agent call uses a fresh
@@ -472,6 +473,8 @@ bad_tool_args > wrong_number > missed_hop > uncited`
 `missed_hop` means a non-numeric fact is missing: each string fact comes from a
 specific section, so a missing one means a retrieval or reasoning hop did not
 happen. `bad_tool_args` means a hallucinated tool or a failed tool call.
+`loop_or_budget` covers a budget stop and a run the guard ended for repeating
+the same call (`stop_reason` is `loop`, `budget_exhausted` stays false).
 
 ### 8.5 Harness, repeats and variance
 
@@ -495,7 +498,9 @@ happen. `bad_tool_args` means a hallucinated tool or a failed tool call.
   gracefully) and is scored as a failure, except a `TransientLLMError` (rate
   limit, 5xx or network failure that outlasted the backoff): it says nothing
   about the system and would weigh on the one that makes more calls, so it is
-  parked in the dead letter and retried too.
+  parked in the dead letter and retried too. Files written before that rule
+  still hold such records; `eval/report.py` and the Results tab leave them out
+  and print how many (50 in `live1.jsonl`, 7 in `live2.jsonl`).
 - **Raw storage**: records are stored unscored. `eval/report.py` scores them
   against the current questions, computes success per repeat, and reports mean
   ± sample standard deviation across repeats, nearest-rank p50/p95 latency
@@ -532,7 +537,10 @@ different questions:
 - **Run-to-run spread**: the sample standard deviation of the success rate
   across repeats, on the same questions. With one repeat there is nothing to
   observe, so it is printed as `n/a`, never as `± 0.0`, which would read as
-  "no variance" when it means "not measured".
+  "no variance" when it means "not measured". The same goes for repeats made
+  with the LLM cache on: they replay the first answer, so their spread is
+  zero by construction. They are printed as `n/a` too, with a note, and their
+  Wilson interval counts questions (majority over repeats), not records.
 - **Sampling uncertainty**: a **95% Wilson score interval** over all scored
   records, with `n` next to every rate (per type too). With 2 to 17 records per
   cell the normal approximation leaves `[0, 1]` and collapses to zero width at

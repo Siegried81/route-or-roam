@@ -60,11 +60,13 @@ def _last_call_messages(state: RunState) -> list[dict]:
     passage fenced, the calculator results and the question. The agent keeps
     all the evidence it gathered; it only loses its own search chatter.
     """
-    names = {c["id"]: c["function"]["name"]
-             for m in state["messages"] for c in m.get("tool_calls") or []}
-    calc = [m["content"] for m in state["messages"]
-            if m["role"] == "tool" and names.get(m.get("tool_call_id")) == "calculate"
-            and not str(m["content"]).startswith(("Tool error", "Duplicate call"))]
+    # The tools node appends one tool message and one tool_calls entry per call,
+    # in the same order, so the i-th tool message is the i-th recorded call.
+    # Only calls that ran (`ok`) are results: an invalid-arguments, tool-error
+    # or blocked-repeat reply is not a number to hand over as exact.
+    replies = [m for m in state["messages"] if m["role"] == "tool"]
+    calc = [m["content"] for m, call in zip(replies, state.get("tool_calls") or [])
+            if call["name"] == "calculate" and call.get("ok")]
     user = f"{fence.fence_all(state['passages'])}\n\n" if state["passages"] else ""
     user += "".join(f"Calculator result (exact): {c}\n" for c in calc)
     user += f"\nQuestion: {state['question']}"
