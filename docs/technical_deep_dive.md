@@ -68,7 +68,7 @@ flowchart LR
     answer -. budget / error .-> stop
 ```
 
-- **plan**: one JSON-mode call returning a `Plan`: 1 to 4 searches, each a
+- **plan**: one JSON-mode call returning a `Plan`: 2 to 4 searches, each a
   query with the one corpus it goes to, and `needs_math`. Queries are written
   in English even for a French question (both corpora are English; French
   queries missed the article sh08, sh09 and mh08 needed). The model is
@@ -230,9 +230,12 @@ last call can overshoot the token limit by its own size: a hard pre-call cap
 would need a token estimate that is not reliable enough.
 
 **The last call (`rr/agent.py`).** `budget.nearly_exhausted` is true when one
-step is left, when 80% of the tokens are used, or when one more call as large as
-the previous one would reach the token cap. The third test exists because the
-agent's prompt grows with every search (a `k=8` search adds 3 to 4k tokens), so
+step is left, when 80% of the tokens are used, or when the predicted next call
+would reach the token cap. The next call is predicted as the last one plus the
+growth seen between the last two (calls of 1,000, 2,500 and 4,000 tokens predict
+5,500); assuming "no larger than the last" let 8 runs stop on the budget message
+on 8 November. The third test exists because the
+agent's prompt grows with every search (a `k=8` search adds 1 to 4k tokens), so
 a single turn could jump from under 80% to past 100% and the run stopped on
 `max_tokens` without ever making the last call. The agent's next call is then made
 **without tools**, with one extra instruction: this is the last call, answer
@@ -527,7 +530,7 @@ model, and a model comparison would need its own pairing (same system, same
 question, two models), which is not built. Without `--models` nothing changes:
 one file `runs/<run_id>.jsonl` with the configured model.
 
-`--workers N` runs N calls at a time, each worker pinned to one Groq key (N is capped at the number of keys), so parallel calls never share a per-key rate limit. Each record still stores its own wall-clock latency, measured inside `answer_question` exactly as with one worker: only the batch finishes sooner. Inside one workflow run, the search node also fetches its 1 to 4 retrieval calls in parallel (local embeddings, no quota) and registers them in plan order, so the sids, the trace and the counts are those of a sequential run; the LLM calls of a run stay sequential, because each depends on the previous one.
+`--workers N` runs N calls at a time, each worker pinned to one Groq key (N is capped at the number of keys), so parallel calls never share a per-key rate limit. Each record still stores its own wall-clock latency, measured inside `answer_question` exactly as with one worker: only the batch finishes sooner. Inside one workflow run, the search node also fetches its 2 to 4 retrieval calls in parallel (local embeddings, no quota) and registers them in plan order, so the sids, the trace and the counts are those of a sequential run; the LLM calls of a run stay sequential, because each depends on the previous one.
 
 ### 8.6 Spread, intervals and the paired test (`eval/stats.py`)
 
@@ -570,12 +573,9 @@ run reported below did not reach that; see section 10.
 
 ## 9. Results
 
-> **Current figures** are the 14 October 2026 run on all 40 questions with the
-> LLM cache off, re-scored on 6 November 2026 after three labels gained their
-> French forms: workflow 30/40, agent 29/40, McNemar p = 1.000 (README and
-> `docs/results.md`). The analysis below is of the earlier 17-question runs
-> (`s120b`, `s120c`), kept because the schema-cap failure it documents is the
-> project's clearest lesson about tool schemas on a provider that validates them.
+> **Current figures** are run `r122e` (8 November 2026, all 40 questions, LLM
+> cache off): workflow 30/40, agent 30/40, McNemar p = 1.000 (README and
+> `docs/results.md`).
 
 > Every figure in this section was measured on the eval set labelled against the
 > four-file AI Act primer, before its relabelling against the full regulation
@@ -781,7 +781,7 @@ by construction.
   words (a regulation described but not named) fails as `missed_hop`. The
   opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
   change it, and it is itself a model: its verdicts are a second opinion.
-- Real runs need grounded-rag's indexes and embedder; the tests (262, offline,
+- Real runs need grounded-rag's indexes and embedder; the tests (276, offline,
   scripted LLM, retrieval mocked) do not.
 
 ## 13. Roadmap
