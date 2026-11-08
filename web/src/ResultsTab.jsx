@@ -73,6 +73,7 @@ export default function ResultsTab({ active = true }) {
         {data && (
           <span className="muted">
             {data.records} scored records{data.unknown_qids ? ` · ${data.unknown_qids} skipped (unknown qid)` : ""}
+            {data.infra_errors ? ` · ${data.infra_errors} left out (rate limit, not an answer)` : ""}
           </span>
         )}
       </div>

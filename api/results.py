@@ -152,6 +152,7 @@ def results_payload(runs_path: Path, questions: list[dict]) -> dict:
         }
     types = [t for t in TYPE_ORDER if any(t in s["by_type"] for s in systems.values())]
     return {"run": runs_path.name, "records": sum(s["n"] for s in systems.values()),
-            "unknown_qids": agg["unknown_qids"], "type_order": types, "systems": systems,
+            "unknown_qids": agg["unknown_qids"], "infra_errors": agg["infra_errors"],
+            "type_order": types, "systems": systems,
             "paired": agg["paired"], "paired_sentence": paired_sentence(agg["paired"]),
             "takeaway": takeaway(systems, agg["paired"])}

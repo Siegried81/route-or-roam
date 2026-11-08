@@ -15,12 +15,16 @@ Why it is built this way:
   standard deviation across repeats. That spread is the run-to-run variance of
   a system on the same questions, which is the thing a single number hides.
   With a single repeat there is no spread to observe, so it is reported as
-  n/a, never as a reassuring "± 0.0".
+  n/a, never as a reassuring "± 0.0". The same holds for repeats made with
+  the LLM cache on (``llm_cache`` in the records): they replay the first
+  answer, so their spread is zero by construction and is reported as n/a.
 - Sampling uncertainty (how much the rate could move with other questions of
   the same kind) is a different thing from run-to-run spread, and is shown as
   a 95% Wilson interval over all scored records, with the record count next to
   every rate. Repeats of one question are not independent, so with several
-  repeats this interval is optimistic; it is a floor on the uncertainty.
+  repeats this interval is optimistic; it is a floor on the uncertainty. With
+  the LLM cache on, repeats are replays, so the interval is computed over
+  questions (majority over repeats) instead of records.
 - Workflow and agent answer the same questions, so they are compared with an
   exact McNemar test (see eval/stats.py), not by eyeballing the gap between two
   rates. The unit is the question: with several repeats a question counts as
@@ -52,7 +56,7 @@ import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from eval.run_compare import PROJECT_ROOT, QUESTIONS_PATH, load_questions
+from eval.run_compare import INFRA_ERROR_PREFIX, PROJECT_ROOT, QUESTIONS_PATH, load_questions
 from eval.score import score_record
 from eval.stats import paired_outcomes, wilson
 
@@ -133,16 +137,25 @@ def aggregate(runs: list[dict], questions: list[dict], verdicts: dict[str, dict]
 
     Records whose qid is no longer in questions.jsonl are counted in
     ``unknown_qids`` and left out, instead of being scored against nothing.
+    Records whose error is a ``TransientLLMError`` (a 429, 5xx or network
+    failure that outlasted the backoff) are counted in ``infra_errors`` and
+    left out too: they say nothing about the system, and scoring them would
+    count the quota against the system that makes more calls. New runs never
+    store them (``eval.run_compare`` parks them in the dead letter); files
+    written before that still do.
     ``verdicts`` (from ``load_verdicts``) adds a ``judge`` entry per system;
     without it the result is exactly what it was before the judge existed.
     """
     by_id = {q["id"]: q for q in questions}
-    out: dict = {"systems": {}, "unknown_qids": 0}
+    out: dict = {"systems": {}, "unknown_qids": 0, "infra_errors": 0, "cached_repeats": False}
     grouped: dict[str, list[tuple[dict, dict, dict]]] = defaultdict(list)
     for rec in runs:
         q = by_id.get(rec.get("qid"))
         if q is None:
             out["unknown_qids"] += 1
+            continue
+        if str(rec.get("error") or "").startswith(INFRA_ERROR_PREFIX):
+            out["infra_errors"] += 1
             continue
         grouped[rec["system"]].append((rec, q, score_record(q, rec)))
 
@@ -157,6 +170,12 @@ def aggregate(runs: list[dict], questions: list[dict], verdicts: dict[str, dict]
         for rec, _, s in items:
             per_question[rec["qid"]].append(s["passed"])
         outcomes[system] = {qid: sum(v) > len(v) / 2 for qid, v in per_question.items()}
+        # With the LLM cache on, repeat 1+ replays repeat 0's replies, so the
+        # spread across repeats is 0 by construction, not observed stability.
+        # It is reported as n/a, like a single repeat.
+        cached = len(overall) > 1 and any(rec.get("llm_cache") for rec, _, _ in items)
+        out["cached_repeats"] = out["cached_repeats"] or cached
+        spread = (lambda ms: (ms[0], None, ms[2])) if cached else (lambda ms: ms)  # noqa: E731
         injected = [s["injection_followed"] for rec, q, s in items if q.get("injected_passage")]
         tags = Counter(s["failure_tag"] for _, _, s in items if s["failure_tag"])
         n = len(items)
@@ -164,9 +183,12 @@ def aggregate(runs: list[dict], questions: list[dict], verdicts: dict[str, dict]
         out["systems"][system] = {
             "n": n,
             "passed": passed,
-            "wilson": wilson(passed, n),
-            "overall": mean_spread(overall),
-            "by_type": {t: mean_spread(by_type[t]) for t in TYPE_ORDER if t in by_type},
+            # Cached replays are one draw per question, not R independent ones, so
+            # the interval counts questions (majority over repeats, as McNemar does).
+            "wilson": (wilson(sum(outcomes[system].values()), len(outcomes[system])) if cached
+                       else wilson(passed, n)),
+            "overall": spread(mean_spread(overall)),
+            "by_type": {t: spread(mean_spread(by_type[t])) for t in TYPE_ORDER if t in by_type},
             "n_by_type": {t: sum(len(v) for v in by_type[t].values()) for t in TYPE_ORDER if t in by_type},
             "llm_calls": _avg([r.get("llm_calls") for r, _, _ in items]),
             "tokens_in": _avg([r.get("tokens_in") for r, _, _ in items]),
@@ -248,6 +270,12 @@ def render_markdown(agg: dict, runs_name: str, png_note: str) -> str:
              "interval is a Wilson interval over all scored records (`eval/stats.py`).", ""]
     if agg["unknown_qids"]:
         lines += [f"> {agg['unknown_qids']} record(s) skipped: qid not in questions.jsonl.", ""]
+    if agg.get("infra_errors"):
+        lines += [f"> {agg['infra_errors']} record(s) left out: rate limit or provider outage "
+                  "(`TransientLLMError`), not an answer.", ""]
+    if agg.get("cached_repeats"):
+        lines += ["> The LLM cache was on: repeats replay the first answer, so there is no "
+                  "run-to-run spread to report (n/a). Set `RR_LLM_CACHE=0` to measure it.", ""]
     sentence = paired_sentence(agg.get("paired"))
     if sentence:
         lines += ["## Workflow vs agent (paired)", "", sentence, ""]

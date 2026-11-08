@@ -201,3 +201,9 @@ def test_string_facts_appear_in_gold_sources():
         for fact in q["key_facts"]:
             if isinstance(fact, str):
                 assert fact_matched(fact, gold), (q["id"], fact)
+
+
+def test_a_loop_stop_is_tagged_loop_or_budget_not_missed_hop():
+    rec = _r(answer="I stopped before finishing: the run kept repeating the same tool call.",
+             citations=[], stop_reason="loop")
+    assert score_record(_q(key_facts=["416"]), rec)["failure_tag"] == "loop_or_budget"

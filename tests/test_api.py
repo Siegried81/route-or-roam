@@ -376,3 +376,15 @@ def test_with_a_token_the_header_decides(client, monkeypatch, tmp_path):
     done = client.post("/api/approve", json={"thread_id": ag["thread_id"], "approve": True},
                        headers={"X-Approve-Token": "s3cret"}).json()
     assert done["decided_by"] == "token" and done["status"] == "done"
+
+
+def test_results_leave_out_a_stored_rate_limit_error(client, runs_dir):
+    # Same rule as eval.report: a quota error is not an answer, so the Results
+    # tab must not score it as the system's failure.
+    rec = {"system": "agent", "qid": "sh01", "repeat": 1, "answer": "", "citations": [],
+           "llm_calls": 0, "tokens_in": 0, "tokens_out": 0, "latency_s": 0.1,
+           "error": "TransientLLMError: rate-limited on every configured key (429)"}
+    with (runs_dir / "live.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write("\n" + json.dumps(rec) + "\n")
+    body = client.get("/api/results", params={"run": "live.jsonl"}).json()
+    assert body["infra_errors"] == 1 and body["systems"]["agent"]["n"] == 2

@@ -144,3 +144,16 @@ def test_calculator_counts_days_between_iso_dates(expr, expected):
 def test_calculator_rejects_bad_dates_and_bare_strings(expr):
     with pytest.raises(ValueError):
         safe_calculate(expr)
+
+
+@pytest.mark.parametrize("expr, shown", [
+    ("416161 * 3", "1248483"),            # ":g" printed 1.24848e+06, rounded and in e-notation
+    ("35000000 * 2", "70000000"),         # ":g" printed 7e+07
+    ("(416161 - 391035) / 391035 * 100", "6.42551178283"),
+    ("10 / 4", "2.5"),
+    ("2 * 21", "42"),
+])
+def test_calculator_result_is_shown_in_full_without_e_notation(expr, shown):
+    # The answer prompt calls this result "exact"; six significant digits and
+    # e-notation are neither exact nor a format the answer should copy.
+    assert run_tool("calculate", {"expression": expr}, []).output == f"{expr} = {shown}"

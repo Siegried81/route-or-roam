@@ -141,3 +141,25 @@ def test_paused_run_resumes_from_checkpoint():
     assert payload["tool"] == "save_report" and not state.get("verify")
     state, payload = agent.resume(graph, "thread-1", approved=True)
     assert payload is None and state["answer"] == GOOD and state["verify"]["ok"]
+
+
+def test_a_run_ended_by_the_loop_guard_is_tagged_loop_or_budget():
+    # The guard's stop is not a budget stop, but it is the loop the tag names;
+    # without the stop reason in the record it fell through to "missed_hop".
+    from eval.score import score_record
+
+    res, _ = _run([tool_reply(SEARCH)] * 3)
+    assert res["stop_reason"] == "loop"
+    q = {"key_facts": ["416"], "expect_refusal": False, "needs_tools": [], "gold_sources": []}
+    assert score_record(q, res)["failure_tag"] == "loop_or_budget"
+
+
+def test_last_call_does_not_present_a_rejected_calculation_as_a_result():
+    # A calculate call with bad arguments answers "Invalid arguments: ..."; the
+    # last call must not hand that to the model as an exact calculator result.
+    searches = [tool_reply(("search_documents", {"query": f"q{i}", "corpus": "filings_sections"}))
+                for i in range(settings.MAX_STEPS - 2)]
+    bad = tool_reply(("calculate", {"expression": "416 - 391", "unit": "USD"}))
+    _, fake = _run(searches + [bad, GOOD])
+    body = "\n".join(str(m["content"]) for m in fake.requests[-1]["messages"])
+    assert "Calculator result" not in body

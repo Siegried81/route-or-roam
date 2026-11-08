@@ -23,7 +23,8 @@ def answer_question(system: Literal["workflow", "agent"], question: str, *, run_
 
     Keys: run_id, system, qid, answer, citations [sid], sources_searched [file],
     tool_calls [{name, args, ok, error}], llm_calls, tokens_in, tokens_out,
-    latency_s, refused, budget_exhausted, injection_flags, hallucinated_tools, error.
+    latency_s, refused, budget_exhausted, stop_reason (max_steps | max_tokens | loop |
+    error | None), injection_flags, hallucinated_tools, error.
     `llm` defaults to the configured Groq/Ollama client; `injected_passage` is an
     evaluation hook appended to every search result; `approve` decides
     save_report calls (agent only; None rejects them).

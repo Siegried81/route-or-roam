@@ -115,3 +115,15 @@ def test_judged_success_keeps_the_other_rules():
     runs = [_rec("The EU AI Act; 416,161.", key="k1", citations=[])]
     agg = report.aggregate(runs, [Q], {"k1": {"key": "k1", "verdict": "correct"}})
     assert agg["systems"]["workflow"]["judge"]["passed"] == 0
+
+
+def test_errored_records_are_not_pending_nor_counted_as_calls(tmp_path):
+    # An errored record has no answer and costs no call; listing it as pending
+    # overstated the --estimate count and re-logged it as a judge error on every resume.
+    runs = [_rec("a", key="k1"), _rec("", key="k2", error="LLMError: HTTP 400")]
+    assert [r["key"] for r in judge.pending_records(runs, [Q], {})] == ["k1"]
+    out = tmp_path / "r.judge.jsonl"
+    stats = judge.run(runs, [Q], out, FakeLLM(['{"verdict": "correct", "reason": "ok"}']),
+                      log=lambda m: None)
+    assert stats == {"judged": 1, "errors": 0}
+    assert judge.run(runs, [Q], out, FakeLLM([]), log=lambda m: None) == {"judged": 0, "errors": 0}
