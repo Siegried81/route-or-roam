@@ -206,3 +206,16 @@ One dated entry per change that alters what the system promises. Append, never r
   push), the compose Ollama image is pinned, and Dependabot may now propose
   Python 3.13 and 3.14 base images (only 3.15 lacks a zstandard wheel).
 
+
+## 2026-11-08: grounded-rag pin moved to e378805
+
+- **What:** `GROUNDED_RAG_REF` in the Dockerfile and in `.github/workflows/ci.yml`
+  goes from 68b8b93 to e378805, grounded-rag's main after #33.
+- **Why:** grounded-rag's main history was rewritten on 8 November to drop
+  commit trailers. The code is identical (68b8b93 and its rewrite 63918be have
+  the same tree), but 68b8b93 is no longer on any branch, so CI and the image
+  build would fail once GitHub prunes it. Moving to e378805 also brings #33:
+  "(S9)" counts as a citation.
+- **What changes in the numbers:** citation counts can only go up (one stored
+  agent answer, sh08, cites in parentheses). `eval.locate_gold` reports nothing
+  missing at e378805; 262 tests pass against it.
