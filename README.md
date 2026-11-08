@@ -50,50 +50,50 @@ flowchart LR
 ## Results
 
 40 questions × 2 systems × 1 run, `openai/gpt-oss-120b` on Groq, LLM cache off
-(`RR_LLM_CACHE=0`, every answer generated for this run), 14 October 2026
-([full report](docs/results.md)). Rates carry a 95% Wilson interval and the two
-systems are compared with an exact McNemar test on paired answers
-(`eval/stats.py`); with one repeat there is no run-to-run spread to report.
-The same records were re-scored on 6 November 2026 after three labels gained
-their French forms (decisions.md): workflow 28/40 became 30/40, the agent is
-unchanged.
+(`RR_LLM_CACHE=0`, every answer generated for this run), 8 November 2026, run
+`r122e` ([full report](docs/results.md)), with grounded-rag at e9535b2. Rates
+carry a 95% Wilson interval and the two systems are compared with an exact
+McNemar test on paired answers (`eval/stats.py`); with one repeat there is no
+run-to-run spread to report.
 
 | type (n) | workflow | agent |
 |---|---|---|
-| single_hop (10) | 7/10 | 9/10 |
-| multi_hop (10) | 9/10 | 7/10 |
-| numeric (8) | 6/8 | 8/8 |
-| cross_corpus (6) | 3/6 | 2/6 |
-| unanswerable (3) | 3/3 | 1/3 |
+| single_hop (10) | 9/10 | 9/10 |
+| multi_hop (10) | 9/10 | 9/10 |
+| numeric (8) | 6/8 | 5/8 |
+| cross_corpus (6) | 1/6 | 3/6 |
+| unanswerable (3) | 3/3 | 2/3 |
 | injection (3) | 2/3 | 2/3 |
-| **overall** | **30/40 (75%)** | **29/40 (72.5%)** |
-| 95% Wilson interval | 60–86% | 57–84% |
-| avg LLM calls · tokens in/out | 2.55 · 2841/915 | 3.50 · 8208/626 |
-| latency p50 / p95 (s) | 5.0 / 9.5 | 12.6 / 41.2 |
+| **overall** | **30/40 (75%)** | **30/40 (75%)** |
+| 95% Wilson interval | 60–86% | 60–86% |
+| avg LLM calls · tokens in/out | 2.60 · 4094/1319 | 3.52 · 7829/687 |
+| latency p50 / p95 (s) | 5.1 / 13.3 | 7.0 / 29.0 |
 | injection followed · budget hit | 0% · 0% | 0% · 10% |
 
-Paired on the 40 questions: only the workflow passed 5, only the agent passed 4,
-both 25, neither 6; exact McNemar p = 1.000.
+Paired on the 40 questions: only the workflow passed 2 (nu03, sh10), only the
+agent passed 2 (cc03, cc06), both 28, neither 8; exact McNemar p = 1.000.
 
-**Takeaway:** the two systems are level on accuracy and fail differently. The
-agent is better on single-hop and numeric questions, where it searches again
-when the first passages are thin; the workflow is better at saying "not in the
-documents" (3/3 against 1/3), on multi-hop and on cross-corpus questions. The
-agent pays for its flexibility in cost and robustness: **2.9× the input tokens,
-2.5× the median latency, a budget hit on 10% of questions**, and four answers
-lost to the provider itself: two outputs Groq could not parse, one tool call
-while tools were disabled, and one request over the free tier's 8,000
-tokens-per-minute limit as its context grew. Nine discordant pairs out of 40
-cannot separate the two systems (p = 1.000), so no winner is claimed. See
+**Takeaway:** the two systems are level, and closer than before: both pass the
+same 28 questions. The agent does better on cross-corpus questions, where it
+searches again; the workflow is better at saying "not in the documents" (3/3
+against 2/3). The agent pays for its flexibility: **1.9× the input tokens,
+1.4× the median latency, and a budget hit on 4 of 40 questions** (on three of
+them it had already answered and ran out during the verification retry, so
+its checked first answer was kept). No answer was lost to the provider this
+time. Four discordant pairs out of 40 cannot separate the two systems
+(p = 1.000), so no winner is claimed. See
 [what the numbers don't say](docs/technical_deep_dive.md#10-what-the-numbers-do-and-dont-say).
 
-Half of the 23 failures need one date, Article 113 of the AI Act, which is a
-single short chunk that rarely ranks for "when does X apply". All nine AI Act
-questions are asked in French against an English corpus, and the workflow's
-plan sometimes searched in French. None of the failures comes from a wrong
-label. Changes made after this run to address both (English queries, paired
-plan, several calculator expressions, a rebuilt last call for the agent) are
-in `docs/decisions.md` (2026-11-06); they need a new run before they show here.
+What both still miss: cross-corpus questions (cc02, cc04, cc05) and the AI Act
+dates of Article 113 (mh08, in03), a single short chunk that rarely ranks for
+"when does X apply". None of the failures comes from a wrong label.
+
+**The 14 October run (`r120e`)**, before the 6 November changes, gave workflow
+30/40 (after a relabel) and agent 29/40. A first run on 8 November (`r121e`)
+showed two regressions from those changes, both fixed before `r122e`: the
+workflow's plan had dropped to one search on 26 questions (27/40, 8 false
+refusals), and the agent's budget guard let 8 runs stop without an answer
+(`docs/decisions.md`, 2026-11-08).
 
 **Earlier runs.** On a 17-question set labelled against grounded-rag's former
 four-file AI Act primer, the agent first scored 9/17 against the workflow's
@@ -172,7 +172,7 @@ python -m eval.report --runs runs/m1--groq-openai-gpt-oss-20b.jsonl runs/m1--gro
 python -m eval.judge --runs runs/r1.jsonl --estimate            # opt-in LLM judge: one call per record
 python -m eval.judge --runs runs/r1.jsonl                       # -> runs/r1.judge.jsonl (resumable)
 python -m eval.report --runs runs/r1.jsonl --judge runs/r1.judge.jsonl   # adds the judge rows
-python -m pytest -q                                             # 274 tests, offline
+python -m pytest -q                                             # 276 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`

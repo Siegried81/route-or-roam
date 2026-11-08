@@ -25,7 +25,8 @@ finally:
 from rr.llm import FakeLLM, tool_reply
 
 GOOD = "Apple total net sales were 416 billion dollars in fiscal 2025 [S1]."
-PLAN = json.dumps({"searches": [{"query": "net sales 2025", "corpus": "filings_sections"}],
+PLAN = json.dumps({"searches": [{"query": "net sales 2025", "corpus": "filings_sections"},
+                                {"query": "Apple total net sales fiscal 2025", "corpus": "filings_sections"}],
                    "needs_math": False})
 SEARCH = ("search_documents", {"query": "net sales 2025", "corpus": "filings_sections"})
 SAVE = ("save_report", {"title": "Apple Sales", "markdown": "416 billion [S1]"})

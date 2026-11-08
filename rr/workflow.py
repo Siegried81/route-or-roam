@@ -29,7 +29,10 @@ from rr.tools import Corpus, prefetch_search, run_tool
 # than this would only queue on it.
 SEARCH_WORKERS = 3
 
-#: Most searches one plan may ask for.
+#: Fewest and most searches one plan may ask for. With a minimum of 1 the model
+#: planned a single search on 26 of 40 questions (8 November): source recall fell
+#: from 0.85 to 0.73 and the workflow refused 8 answerable questions.
+MIN_SEARCHES = 2
 MAX_SEARCHES = 4
 #: Most calculator expressions the calculate step may return.
 MAX_EXPRESSIONS = 3
@@ -39,8 +42,9 @@ PLAN_SYSTEM = (
     f"{CORPUS_LINES}\n"
     'Reply with JSON only: {"searches": [{"query": "...", "corpus": "..."}], '
     '"needs_math": true|false}. '
-    f"searches: 1 to {MAX_SEARCHES} short search queries, each sent to the one corpus that "
-    "can answer it; a question that spans both corpora needs a search in each. "
+    f"searches: {MIN_SEARCHES} to {MAX_SEARCHES} short search queries, each sent to the one corpus "
+    "that can answer it. Give each part of the question its own search, phrase a one-part "
+    "question two different ways, and give a question that spans both corpora a search in each. "
     f"{QUERY_LANGUAGE_RULE} needs_math: true only if the answer requires arithmetic on numbers "
     "or dates from the documents."
 )
@@ -72,7 +76,7 @@ class Plan(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    searches: list[PlannedSearch] = Field(min_length=1, max_length=MAX_SEARCHES)
+    searches: list[PlannedSearch] = Field(min_length=MIN_SEARCHES, max_length=MAX_SEARCHES)
     needs_math: bool = False
 
 

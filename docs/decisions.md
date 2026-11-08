@@ -254,3 +254,29 @@ One dated entry per change that alters what the system promises. Append, never r
 - **Agent last call (`rr/agent.py`):** a calculate call rejected for invalid
   arguments was handed to the last call as "Calculator result (exact): Invalid
   arguments: ...". Only calls that ran are passed on now.
+
+## 2026-11-08: Two regressions from 2026-11-06 found by a re-run and fixed; results re-run
+
+- **What:** grounded-rag is pinned to e9535b2 (its main after #34) in the
+  Dockerfile and CI. The first run on it, `r121e`, showed two regressions
+  from the 6 November design changes, both fixed and measured again in
+  `r122e`, which the README and `docs/results.md` now report.
+- **Workflow plan:** with a minimum of 1 search, the paired plan asked for a
+  single search on 26 of 40 questions (mean 1.35 searches against 2.12 on
+  14 October). Source recall fell from 0.85 to 0.73 and the workflow refused
+  8 answerable questions (27/40). `MIN_SEARCHES = 2` and a prompt that asks
+  for one search per part of the question bring it back to a mean of 3.83
+  searches, recall 0.83, 2 false refusals, 30/40.
+- **Agent budget:** `nearly_exhausted` assumed the next call no larger than
+  the last; agent calls grow by about 1k tokens per k=10 search, so 8 runs in
+  `r121e` reached ~12,100 tokens after 4 calls and stopped on the budget
+  message. It now adds the growth seen between the last two calls. In
+  `r122e` one run stops that way (cc02); three more hit the budget during the
+  verification retry, after a checked answer that is kept.
+- **What changes in the numbers:** `r122e` gives workflow 30/40, agent 30/40,
+  both pass 28, McNemar p = 1.000. The workflow now spends 4,094 input tokens
+  a question (2,841 on 14 October) because it searches more. Runs before this
+  date are not comparable with `r122e`: the plan, the budget guard and
+  grounded-rag's verifier (#34, a citation after the full stop now cites the
+  sentence before it) all changed.
+

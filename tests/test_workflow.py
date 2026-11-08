@@ -5,7 +5,7 @@ from rr.common import BUDGET_MESSAGE
 from rr.llm import ChatResponse, FakeLLM, LLMError
 from rr.run import answer_question
 
-PLAN = ('{"searches": [{"query": "net sales 2025", "corpus": "filings_sections"}], '
+PLAN = ('{"searches": [{"query": "net sales 2025", "corpus": "filings_sections"}, {"query": "Apple total net sales fiscal 2025", "corpus": "filings_sections"}], '
         '"needs_math": false}')
 GOOD = "Apple total net sales were 416 billion dollars in fiscal 2025 [S1]."
 
@@ -20,7 +20,7 @@ def test_happy_path():
     res, fake = _run([PLAN, GOOD])
     assert res["error"] is None and res["answer"] == GOOD
     assert res["citations"] == ["S1"] and not res["refused"]
-    assert res["llm_calls"] == 2 and [c["name"] for c in res["tool_calls"]] == ["search_documents"]
+    assert res["llm_calls"] == 2 and [c["name"] for c in res["tool_calls"]] == ["search_documents"] * 2
     assert res["sources_searched"] == ["05_mdna.txt", "02_risk_factors.txt"]
     answer_prompt = fake.requests[1]["messages"]
     assert grounded.SYSTEM_PROMPT in answer_prompt[0]["content"]
@@ -40,7 +40,7 @@ def test_verify_failure_gets_exactly_one_retry():
 def test_math_path_uses_calculator():
     plan = PLAN.replace("false", "true")
     res, fake = _run([plan, '{"expressions": ["416 - 391"]}', GOOD])
-    assert [c["name"] for c in res["tool_calls"]] == ["search_documents", "calculate"]
+    assert [c["name"] for c in res["tool_calls"]] == ["search_documents"] * 2 + ["calculate"]
     assert "Calculator result (exact): 416 - 391 = 25" in fake.requests[2]["messages"][1]["content"]
 
 
@@ -51,7 +51,7 @@ def test_several_expressions_and_a_date_span_are_all_computed_in_one_call():
     exprs = ('{"expressions": ["416161 - 391035", "(416161 - 391035) / 391035 * 100", '
              '"days_between(\\"2025-09-27\\", \\"2026-08-02\\")"]}')
     res, fake = _run([plan, exprs, GOOD])
-    assert [c["name"] for c in res["tool_calls"]] == ["search_documents"] + ["calculate"] * 3
+    assert [c["name"] for c in res["tool_calls"]] == ["search_documents"] * 2 + ["calculate"] * 3
     prompt = fake.requests[2]["messages"][1]["content"]
     assert "= 25126" in prompt and "= 6.42551" in prompt and "= 309" in prompt
     assert res["llm_calls"] == 3
@@ -60,7 +60,7 @@ def test_several_expressions_and_a_date_span_are_all_computed_in_one_call():
 def test_a_failing_expression_is_traced_and_the_others_still_reach_the_answer():
     plan = PLAN.replace("false", "true")
     res, fake = _run([plan, '{"expressions": ["416 - 391", "open(1)"]}', GOOD])
-    assert [c["ok"] for c in res["tool_calls"][1:]] == [True, False]
+    assert [c["ok"] for c in res["tool_calls"][2:]] == [True, False]
     prompt = fake.requests[2]["messages"][1]["content"]
     assert prompt.count("Calculator result (exact)") == 1
 
@@ -137,3 +137,13 @@ def test_search_retrieval_error_is_reported_per_call(monkeypatch):
     res, _ = _run([PLAN, "no sources"])
     assert res["tool_calls"][0]["error"].startswith("tool_error: embedder down")
     assert res["refused"] and res["error"] is None
+
+
+def test_a_one_search_plan_is_rejected_for_the_two_search_fallback():
+    # One search was the model's usual answer once the plan paired queries with
+    # corpora: 26 of 40 questions on 8 November, source recall 0.85 -> 0.73 and
+    # 8 false refusals. A plan must ask for at least two searches.
+    one = '{"searches": [{"query": "net sales 2025", "corpus": "filings_sections"}], "needs_math": false}'
+    res, fake = _run([one, GOOD])
+    assert len([c for c in res["tool_calls"] if c["name"] == "search_documents"]) == len(settings.CORPORA)
+    assert "2 to 4 short search queries" in fake.requests[0]["messages"][0]["content"]
