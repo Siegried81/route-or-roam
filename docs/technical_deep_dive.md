@@ -592,7 +592,7 @@ records were scored with the current `eval/score.py` (re-scoring changed no
 verdict), but they were **produced before** the agent's last-call step
 (section 4) and the citation-aware refusal rule (section 2.4): the agent's
 `budget_exhausted` and `refused` values, and so the unanswerable row, are not
-what the current code would give. It was re-run on 14 October 2026 (box at the top of this section).
+what the current code would give. The box at the top of this section has the current run.
 
 | metric | workflow | agent (`s120c`) |
 |---|---|---|
@@ -690,11 +690,13 @@ top of this section: 15/17.
 ## 10. What the numbers do and don't say
 
 The bullets below were written for the 17-question runs of section 9. On the
-current 40-question run the same caveats hold with other numbers: Wilson
-intervals of 60–86% (workflow) and 57–84% (agent), 9 discordant pairs, 3 to 10
-questions per type. Its failures cluster on one date (Article 113 of the AI
-Act, needed by about half of them) and on French questions asked against an
-English corpus; none comes from a wrong label.
+current 40-question run (`r122e`) the same caveats hold with other numbers:
+both systems pass 30/40, Wilson interval 60% to 86% for each, 3 to 10
+questions per type. Only 4 pairs are discordant (2 each way, p = 1.0). With 4
+the smallest possible p is 0.125, so that run couldn't have shown a
+difference at 5%. It needs more questions. Both systems still miss the
+cross-corpus questions cc02, cc04 and cc05 and the Article 113 dates (mh08,
+in03).
 
 What they say:
 

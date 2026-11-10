@@ -267,16 +267,17 @@ their traces and shows an approval modal when the agent asks for `save_report`.
 
 ## Honest limits
 
-- One run of 40 questions on one model: the run-to-run spread is reported as
-  n/a (one repeat), the Wilson intervals span 60–86% and 57–84%, and the
-  McNemar test has only 9 discordant pairs to work with. 3 to 10 questions per
-  type. The design target (40 × 2 × 3, cache off) has not been run yet.
-- The published run predates three fixes of 6 November 2026: the agent's
-  last call now comes before a large turn overshoots the token budget, an
-  uncited claim next to the refusal sentence no longer counts as a refusal,
-  and Groq's `output_parse_failed` is retried once. The first and third can
-  only help the agent; the run needs repeating before the agent's budget and
-  error rows are read again.
+- One run of 40 questions on one model, so there's no run-to-run spread (it
+  shows as n/a). Both systems pass 30/40, and the 95% Wilson interval is 60%
+  to 86% for each.
+- The run can't pick a winner. Only 4 questions split the systems, 2 each way,
+  so the exact McNemar p is 1.0. With 4 discordant pairs the smallest p you
+  can get is 0.125 (all 4 going the same way), so no result could have
+  reached 5%. It needs more questions. There are also only 3 to 10 questions
+  per type, and the design target (40 × 2 × 3, cache off) hasn't been run yet.
+- `r122e` is the first run with the 6 November fixes and the two 8 November
+  regression fixes. Runs before it aren't comparable (`docs/decisions.md`,
+  2026-11-08).
 - Latency mostly measures free-tier rate-limit waits, not the designs.
 - Scoring is string and number matching; a correct paraphrase can fail. The
   opt-in LLM judge (`eval/judge.py`) flags those cases in extra report rows;
