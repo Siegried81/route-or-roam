@@ -8,13 +8,34 @@ const TABS = [
   { id: "results", label: "Results" },
 ];
 
+const CONFIG_RETRY_MS = 2000;
+const CONFIG_RETRY_FOR_MS = 60000;
+
 export default function App() {
   const [tab, setTab] = useState(() => (location.hash === "#results" ? "results" : "ask"));
   const [config, setConfig] = useState(null);
   const [configError, setConfigError] = useState(null);
 
+  // The API can still be starting when the page loads (importing grounded-rag
+  // takes a few seconds, longer on a cold Render start), and the dev proxy or
+  // Render's edge answers 502/503/504 meanwhile. Those, and a network error,
+  // are retried every CONFIG_RETRY_MS for CONFIG_RETRY_FOR_MS while the badge
+  // says "Connecting…"; any other error is real and shown at once.
   useEffect(() => {
-    api("/api/config").then(setConfig).catch((e) => setConfigError(e.message));
+    let stopped = false;
+    let timer;
+    const deadline = Date.now() + CONFIG_RETRY_FOR_MS;
+    const load = () =>
+      api("/api/config")
+        .then((c) => { if (!stopped) setConfig(c); })
+        .catch((e) => {
+          if (stopped) return;
+          const transient = e.status === undefined || [502, 503, 504].includes(e.status);
+          if (transient && Date.now() < deadline) timer = setTimeout(load, CONFIG_RETRY_MS);
+          else setConfigError(e.message);
+        });
+    load();
+    return () => { stopped = true; clearTimeout(timer); };
   }, []);
 
   const select = (id) => {
