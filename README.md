@@ -241,8 +241,8 @@ GROUNDED_RAG_PATH = ".grounded-rag"  # relative to this repository
 GROUNDED_RAG_REF = "main"            # branch, tag or commit sha
 RR_INGEST_ON_START = "1"             # build a corpus index on first use
 EMBED_PROVIDER = "hosted"            # no Ollama there; any OpenAI-compatible /embeddings endpoint
-HOSTED_EMBED_BASE_URL = "https://api.mistral.ai/v1"
-HOSTED_EMBED_MODEL = "mistral-embed"
+HOSTED_EMBED_BASE_URL = "https://openrouter.ai/api/v1"
+HOSTED_EMBED_MODEL = "nvidia/nemotron-3.5-embed-1b:free"
 HOSTED_EMBED_API_KEY = "..."
 GROQ_API_KEY = "..."
 ```
