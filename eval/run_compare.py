@@ -50,6 +50,7 @@ import hashlib
 import json
 import queue
 import re
+import subprocess
 import threading
 import time
 import traceback
@@ -149,6 +150,35 @@ def run_settings(provider: str | None = None, model: str | None = None) -> dict:
     return {"provider": provider, "model": model, "llm_cache": settings.LLM_CACHE,
             "max_steps": settings.MAX_STEPS, "max_tokens": settings.MAX_TOKENS,
             "max_search_k": settings.MAX_SEARCH_K, "workflow_search_k": settings.WORKFLOW_SEARCH_K}
+
+
+def _git(repo: Path, *args: str) -> str | None:
+    """Output of ``git <args>`` in ``repo``, or None when it is not a git checkout or git is missing."""
+    try:
+        out = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def provenance(questions_path: Path = QUESTIONS_PATH) -> dict:
+    """Which code and which questions produced a run, stored with every record.
+
+    ``code_sha`` is route-or-roam's HEAD and ``code_dirty`` says whether files
+    other than the outputs (``runs/``, ``reports/``, which a run itself writes)
+    differ from it; ``grounded_rag_sha`` is the HEAD of the checkout at
+    ``GROUNDED_RAG_PATH`` ("unknown" when that is not a git checkout, as in the
+    Docker image); ``questions_sha256`` is the hash of the questions file.
+    Without it a runs file cannot say what it measured.
+    """
+    from rr import settings
+
+    root = settings.ROOT
+    dirty = _git(root, "status", "--porcelain", "--", ".", ":!runs", ":!reports")
+    return {"code_sha": _git(root, "rev-parse", "HEAD") or "unknown",
+            "code_dirty": bool(dirty) if dirty is not None else None,
+            "grounded_rag_sha": _git(settings.GROUNDED_RAG_PATH, "rev-parse", "HEAD") or "unknown",
+            "questions_sha256": hashlib.sha256(Path(questions_path).read_bytes()).hexdigest()}
 
 
 def estimate(pending: int, max_steps: int, max_tokens: int) -> str:
@@ -307,7 +337,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.estimate:
         return
     for run_id, provider, model in targets:
-        meta = run_settings(provider, model)
+        meta = run_settings(provider, model) | provenance(args.questions)
         llms = make_worker_llms(args.workers, provider, model) if args.workers > 1 else None
         if llms is None and model is not None:
             # A named model needs its own client even with one worker (otherwise

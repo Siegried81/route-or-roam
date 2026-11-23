@@ -142,3 +142,50 @@ def test_cross_report_keeps_files_apart(tmp_path, monkeypatch, groq):
     report.main(["--runs", str(tmp_path / "x--groq-big.jsonl"), "--questions", str(qfile),
                  "--out", str(single), "--png", str(tmp_path / "one.png")])
     assert single.read_text(encoding="utf-8").startswith("# Results: `x--groq-big.jsonl`")
+
+
+def test_provenance_in_a_git_checkout(tmp_path, monkeypatch):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)  # noqa: E731
+    git("init")
+    (repo / "f.txt").write_text("x")
+    git("add", ".")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "c")
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    monkeypatch.setattr(settings, "ROOT", repo)
+    monkeypatch.setattr(settings, "GROUNDED_RAG_PATH", repo)
+    q = tmp_path / "q.jsonl"
+    q.write_bytes(b'{"id": "a"}\n')
+
+    meta = run_compare.provenance(q)
+    assert meta["code_sha"] == sha and meta["grounded_rag_sha"] == sha
+    assert meta["code_dirty"] is False
+    import hashlib
+    assert meta["questions_sha256"] == hashlib.sha256(b'{"id": "a"}\n').hexdigest()
+
+    (repo / "f.txt").write_text("changed")
+    assert run_compare.provenance(q)["code_dirty"] is True
+    (repo / "runs").mkdir()
+    (repo / "f.txt").write_text("x")
+    (repo / "runs" / "r.jsonl").write_text("{}")
+    assert run_compare.provenance(q)["code_dirty"] is False  # outputs do not count
+
+
+def test_provenance_outside_git_is_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "GROUNDED_RAG_PATH", tmp_path)
+    q = tmp_path / "q.jsonl"
+    q.write_text("{}\n")
+    assert run_compare.provenance(q)["grounded_rag_sha"] == "unknown"
+
+
+def test_main_writes_provenance_into_records(tmp_path, monkeypatch, groq):
+    import json
+
+    monkeypatch.setattr(run_compare, "_default_answer_fn", lambda: ModelAnswer())
+    qf = _qfile(tmp_path)
+    run_compare.main(["--run-id", "p", "--repeats", "1", "--questions", str(qf), "--runs-dir", str(tmp_path)])
+    rec = json.loads((tmp_path / "p.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert {"code_sha", "code_dirty", "grounded_rag_sha", "questions_sha256"} <= set(rec)
