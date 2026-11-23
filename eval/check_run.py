@@ -7,6 +7,12 @@ interrupted run can loop until this passes, so a duplicate or a silent provider
 fallback keeps a run from being called finished.
 
     python -m eval.check_run runs/r1.jsonl [--expected 240] [--provider groq]
+    python -m eval.check_run runs/r1.jsonl --questions eval/questions_v2.jsonl --repeats 2
+
+``--questions`` derives the expected count from a questions file (questions x
+systems x ``--repeats``, 2 systems and 3 repeats by default), so a 100-question
+run is not checked against 240. ``--expected`` wins over it; with neither flag
+the default is still 240.
 """
 
 from __future__ import annotations
@@ -30,14 +36,27 @@ def check(path: Path, expected: int = 240, provider: str = "groq") -> tuple[bool
     return len(rows) == expected and not dupes and set(providers) == {provider}, line
 
 
+def expected_from_questions(path: Path, repeats: int = 3, systems: int = 2) -> int:
+    """Records a complete run over the questions file at ``path`` holds."""
+    n = sum(1 for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip())
+    return n * systems * repeats
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; the exit code is 0 only for a complete, clean file."""
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("runs_file", type=Path)
-    p.add_argument("--expected", type=int, default=240)
+    p.add_argument("--expected", type=int, default=None,
+                   help="Records expected (default: 240, or derived from --questions).")
+    p.add_argument("--questions", type=Path, default=None,
+                   help="Questions file the run used: expected = questions x 2 systems x --repeats.")
+    p.add_argument("--repeats", type=int, default=3, help="Repeats per question, with --questions.")
     p.add_argument("--provider", default="groq")
     args = p.parse_args(argv)
-    ok, line = check(args.runs_file, args.expected, args.provider)
+    expected = args.expected
+    if expected is None:
+        expected = expected_from_questions(args.questions, args.repeats) if args.questions else 240
+    ok, line = check(args.runs_file, expected, args.provider)
     print(line)
     return 0 if ok else 1
 

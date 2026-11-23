@@ -4,6 +4,7 @@ Usage (from the project root):
     python -m eval.run_compare --run-id r1 [--repeats 3] [--systems workflow,agent]
                                [--type numeric] [--limit 5] [--sleep 2]
                                [--models openai/gpt-oss-20b,openai/gpt-oss-120b]
+                               [--questions eval/questions_v2.jsonl]
 
 Why it is built this way:
 - Every (system, qid, repeat, run_id) gets a sha256 key. Keys already present in
@@ -48,6 +49,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import queue
 import re
 import subprocess
@@ -60,7 +62,24 @@ from pathlib import Path
 from typing import Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-QUESTIONS_PATH = Path(__file__).resolve().parent / "questions.jsonl"
+DEFAULT_QUESTIONS_PATH = Path(__file__).resolve().parent / "questions.jsonl"
+#: Environment variable that points every eval tool at another questions file
+#: (``eval/questions_v2.jsonl``, a 100-question union...). Unset, nothing changes.
+QUESTIONS_ENV = "RR_QUESTIONS"
+
+
+def questions_path_from_env() -> Path:
+    """The questions file the tools default to: ``$RR_QUESTIONS`` if set, else questions.jsonl.
+
+    An explicit ``--questions`` always wins over the variable. The path is kept
+    as written (a relative one is read from the current folder), and provenance
+    hashes whichever file was actually read.
+    """
+    value = os.environ.get(QUESTIONS_ENV, "").strip()
+    return Path(value) if value else DEFAULT_QUESTIONS_PATH
+
+
+QUESTIONS_PATH = questions_path_from_env()
 RUNS_DIR = PROJECT_ROOT / "runs"
 SYSTEMS = ("workflow", "agent")
 
