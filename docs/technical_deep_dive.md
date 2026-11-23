@@ -504,7 +504,7 @@ They don't say:
   calculator, an identifier like "10-K"). It costs a retry, which can end in a
   refusal.
 - Temperature is 0, but hosted models are not perfectly deterministic.
-- Real runs need grounded-rag's indexes and embedder; the 375 tests are offline.
+- Real runs need grounded-rag's indexes and embedder; the 376 tests are offline.
 
 Next: more questions per type (§10); a cross-model run on `gpt-oss-20b`,
 `gpt-oss-120b` and a local Ollama model (the harness exists, §8.4), with a

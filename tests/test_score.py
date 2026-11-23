@@ -91,8 +91,8 @@ def test_pass_when_all_rules_hold():
 
 
 def test_missing_number_is_wrong_number():
-    s = score_record(_q(key_facts=[25126, 6.4]), _r(answer="Up $25.1 billion, about 7%."))
-    assert not s["passed"] and s["failure_tag"] == "wrong_number" and s["missing_facts"] == [6.4]
+    s = score_record(_q(key_facts=[25126, 6.43]), _r(answer="Up $25.1 billion, about 7%."))
+    assert not s["passed"] and s["failure_tag"] == "wrong_number" and s["missing_facts"] == [6.43]
 
 
 def test_missing_string_is_missed_hop():

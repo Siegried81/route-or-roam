@@ -113,3 +113,22 @@ def test_the_questions_that_ask_for_a_decimal_carry_min_decimals():
     assert asking == {"nu01", "nu02", "nu03", "nu07"}
     assert {q["id"] for q in qs if "min_decimals" in q} == asking
     assert all(q["min_decimals"] == 1 for q in qs if "min_decimals" in q)
+
+
+def test_the_one_decimal_labels_are_full_precision_and_accept_both_roundings():
+    """nu01, nu02, nu07 are stored as computed (6.43, 26.23, 9.67): the one-decimal
+    rounding and the full value are both right, the one-digit rounding is not."""
+    import json
+    from pathlib import Path
+    qs = {q["id"]: q for q in (json.loads(l) for l in (Path(__file__).resolve().parents[1] / "eval"
+          / "questions.jsonl").read_text(encoding="utf-8").splitlines() if l.strip())}
+    for qid, full, one, wrong in (("nu01", 6.43, "6.4", "6.5"), ("nu02", 26.23, "26.2", "26.3"),
+                                  ("nu07", 9.67, "9.7", "9.6")):
+        q = qs[qid]
+        assert full in q["key_facts"] and q["min_decimals"] == 1
+        assert fact_matched(full, f"{one} %", 1) and fact_matched(full, f"{full} %", 1)
+        assert not fact_matched(full, f"{wrong} %", 1)
+        assert not fact_matched(full, f"{round(full)} %", 1)
+    assert qs["nu01"]["key_facts"][1] == pytest.approx(100 * (416161 / 391035 - 1), abs=5e-3)
+    assert qs["nu02"]["key_facts"][0] == pytest.approx(100 * 109158 / 416161, abs=5e-3)
+    assert qs["nu07"]["key_facts"][1] == pytest.approx(100 * (590 / 538 - 1), abs=5e-3)

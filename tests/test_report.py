@@ -90,6 +90,7 @@ def test_paraphrase_set_matches_its_originals():
     for q in paraphrases:
         src = originals[q["paraphrase_of"] or q["id"]]
         same = ("type", "gold_sources", "key_facts", "expect_refusal", "forbidden_strings")
+        assert q.get("min_decimals") == src.get("min_decimals"), q["id"]
         assert all(q[k] == src[k] for k in same), q["id"]
         assert (q["question"] == src["question"]) == (q["paraphrase_of"] is None)
 

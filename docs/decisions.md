@@ -353,12 +353,20 @@ behind them is old.
   alone moved 3 records from fail to pass (`nu01` answered "6 %": `r122e` agent,
   `r126e` agent repeats 1 and 2) and none the other way; with `min_decimals`
   those 3 fail again, so the final rule gives the same verdict as ±1% on all 560
-  records. Every total, majority, McNemar p, count by type and cost per correct
+  records (checked again after the label corrections). Every total, majority, McNemar p, count by type and cost per correct
   answer is unchanged. Earlier entries quote the figures of their day.
+- **Labels corrected, `nu01`, `nu02`, `nu07`:** 6.4 becomes 6.43, 26.2 becomes
+  26.23, 9.7 becomes 9.67 (`eval/paraphrases.jsonl` follows for `nu02` and its
+  two rephrasings, which also get `min_decimals: 1`). They were rounded to the
+  one decimal the question asks for, so the full "6.43 %" failed against 6.4.
+  From the sources in `05_mdna.txt` and `06_market_risk.txt`: 416,161 / 391,035
+  - 1 = 0.064255, 109,158 / 416,161 = 0.262298, 590 / 538 - 1 = 0.096654. With
+  `min_decimals: 1`, "6.4 %" and "6.43 %" both pass for 6.43 (6.43 rounded to
+  one decimal is 6.4), "6 %" and "6.5 %" fail; likewise for the other two. The
+  other numeric facts were checked and are exact: 91.3 and the integers are
+  quoted from the source, 41616.1 is 10% of 416,161, 104.7 is 89.3 + 15.4.
 - **Limit:** a one-digit answer is accepted over a wide range when a question sets
-  no `min_decimals`. The labels 6.4, 9.7 and 26.2 are rounded values (true 6.43,
-  9.67, 26.23), so a more precise correct answer such as "6.43" fails against the
-  label 6.4; no stored answer does it.
+  no `min_decimals`.
 
 ## 2026-11-23: A refusal that cites its sources is still a refusal
 
@@ -384,5 +392,5 @@ behind them is old.
 - **Limit:** "I don't know. The documents say revenue was 416 billion [S1]."
   counts as a refusal, as decided: a strong refusal followed by a description of
   the sources. On a real answer set it would be worth reading these by eye.
-- **Tests:** 307 to 375 (number rule, `min_decimals`, refusal rule in five
+- **Tests:** 307 to 376 (number rule, `min_decimals`, refusal rule in five
   languages, the hesitation-then-claim guard, `cited_refusal`).
