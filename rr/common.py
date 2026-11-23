@@ -9,12 +9,12 @@ here, the comparison would no longer be like for like.
 from __future__ import annotations
 
 import math
-import re
 from typing import TypedDict
 
 from rr import budget as budget_mod
 from rr import fence, grounded, settings
 from rr.llm import LLMError, call_with_backoff
+from rr.refusal import detect_refusal
 from rr.tools import ToolResult, safe_calculate
 
 BUDGET_MESSAGE = "I stopped before finishing: the run hit its step or token budget, so I won't guess."
@@ -49,6 +49,7 @@ class RunState(TypedDict, total=False):
     hallucinated_tools: int
     answer: str
     refused: bool
+    cited_refusal: bool           # refused although the answer carried valid citations
     citations: list[str]
     verify: dict
     retry_used: bool
@@ -108,22 +109,17 @@ def as_retrieved(passages: list[dict]) -> list:
 
 
 def is_refusal(answer: str) -> bool:
-    """True when the answer is grounded-rag's refusal sentence and nothing else.
+    """True when the answer declines to answer, with or without citations.
 
-    The sentence may be in any of grounded-rag's languages (a question asked in
-    French is often refused in French) and may be repeated or padded with
-    spaces. Any other word in the answer is a claim: "Revenue was 416 billion.
-    I couldn't find anything..." asserts a figure, and scoring it as a refusal
-    would pass an unanswerable question on a made-up number. Curly apostrophes
-    are folded to straight ones first, since models often emit them.
+    The exact refusal sentence of grounded-rag (any of its languages, repeated
+    or padded) is one case; the rule in rr/refusal.py covers the rest: every
+    sentence a refusal, or a strong refusal followed only by a description of
+    what the sources contain, even with [S#] markers. A hesitation followed by a
+    claim ("I'm not sure, but revenue was 416 billion [S1].") is an answer, and
+    so is a claim before the refusal sentence: scoring either as a refusal would
+    pass an unanswerable question on a made-up figure.
     """
-    text = answer.replace("\u2019", "'")
-    found = False
-    for sentence in grounded.REFUSAL_MESSAGE_SET:
-        if sentence in text:
-            found = True
-            text = text.replace(sentence, "")
-    return found and not re.sub(r"[\W_]+", "", text)
+    return detect_refusal(answer)
 
 
 #: Scales a calculator result may be written at: as computed, as a percentage,
@@ -200,7 +196,8 @@ def check_answer(answer: str, passages: list[dict], *, question: str = "",
     # so the stored answer, the UI and the score all see the same citations.
     answer = grounded.gr_answer.normalize_citations(answer)
     report = grounded.verify(answer, as_retrieved(passages))
-    refused = not report.valid_citations and is_refusal(answer)
+    refused = is_refusal(answer)
+    cited_refusal = refused and bool(report.valid_citations)
     given = grounded.figures_in(question)
     values = calculator_values(tool_calls)
     unsupported = [n for n in report.unsupported_numbers
@@ -210,6 +207,7 @@ def check_answer(answer: str, passages: list[dict], *, question: str = "",
     return {
         "answer": answer,
         "refused": refused,
+        "cited_refusal": cited_refusal,
         "citations": [] if refused else [f"S{i}" for i in report.valid_citations],
         "verify": {"ok": ok, "grounding": round(report.grounding_score, 3),
                    "invalid_citations": report.invalid_citations,
@@ -240,7 +238,7 @@ def verify_feedback(verify: dict) -> str:
 def stop_updates(stop_reason: str | None) -> dict:
     """Final answer fields when a run stops on its budget or a loop instead of answering."""
     message = LOOP_MESSAGE if stop_reason == "loop" else BUDGET_MESSAGE
-    return {"answer": message, "refused": False, "citations": []}
+    return {"answer": message, "refused": False, "cited_refusal": False, "citations": []}
 
 
 def to_result(state: RunState, *, run_id: str, system: str, qid: str, latency_s: float) -> dict:
@@ -260,6 +258,7 @@ def to_result(state: RunState, *, run_id: str, system: str, qid: str, latency_s:
         "tokens_out": b["tokens_out"],
         "latency_s": round(latency_s, 3),
         "refused": bool(state.get("refused")),
+        "cited_refusal": bool(state.get("cited_refusal")),
         "budget_exhausted": state.get("stop_reason") in ("max_steps", "max_tokens"),
         "stop_reason": state.get("stop_reason"),
         "injection_flags": fence.count_flags(passages),

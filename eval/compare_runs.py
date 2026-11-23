@@ -50,7 +50,7 @@ def load_run(path: str | Path, questions: dict[str, dict]) -> dict:
                 continue
             scored = score_record(questions[rec["qid"]], rec)
             cells[(rec["system"], rec["qid"], int(rec["repeat"]))] = (
-                bool(scored["passed"]), bool(rec.get("refused")))
+                bool(scored["passed"]), bool(scored["refused"]))
     return cells
 
 

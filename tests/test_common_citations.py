@@ -50,3 +50,21 @@ def test_a_refusal_with_curly_apostrophes_counts_as_a_refusal():
 def test_the_refusal_sentence_alone_with_spacing_still_counts():
     out = common.check_answer(f"  {grounded.REFUSAL_MESSAGE}\n", PASSAGES)
     assert out["refused"]
+
+
+def test_a_cited_refusal_is_a_refusal_and_is_flagged():
+    text = "I cannot answer that. The documents only describe the timeline of obligations [S1]."
+    out = common.check_answer(text, PASSAGES)
+    assert out["refused"] and out["cited_refusal"] and out["citations"] == []
+
+
+def test_a_plain_refusal_is_not_a_cited_refusal():
+    out = common.check_answer(grounded.REFUSAL_MESSAGE, PASSAGES)
+    assert out["refused"] and not out["cited_refusal"]
+
+
+def test_a_hesitation_before_a_cited_claim_is_an_answer():
+    text = ("I'm not sure, but the obligations for high-risk systems apply "
+            "from August 2026 [S1].")
+    out = common.check_answer(text, PASSAGES)
+    assert not out["refused"] and not out["cited_refusal"] and out["citations"] == ["S1"]

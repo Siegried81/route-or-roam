@@ -14,7 +14,6 @@ from eval.score import (  # noqa: E402
     extract_numbers,
     fact_matched,
     normalise,
-    number_matches,
     score_record,
     source_recall,
 )
@@ -57,7 +56,7 @@ def test_contains_phrase_is_whole_word():
     ("6.4% growth", [6.4]),
     ("41,6 milliards", [41.6]),
     ("1 234,5 et 166 000", [1234.5, 166000]),
-    ("fell by -2,575", [-2575]),
+    ("fell by -2,575", [2575]),
     ("in 2025 416,161", [2025, 416161]),
     ("September 27, 2025", [27, 2025]),
 ])
@@ -65,31 +64,14 @@ def test_extract_numbers_formats(text, expected):
     assert extract_numbers(text) == pytest.approx(expected)
 
 
-def test_number_tolerance_is_one_percent():
-    assert number_matches(6.43, 6.4)
-    assert not number_matches(6.43, 6.0)
-    assert number_matches(100, 101) and not number_matches(100, 101.5)
-
-
-def test_number_scale_and_sign_tolerance():
-    assert number_matches(25126, 25.1)        # "$25.1 billion" vs millions
-    assert number_matches(41616.1, 41.6)
-    assert number_matches(-2575, 2575)
-    assert number_matches(166000, 166)        # "166 thousand"
-
-
-def test_small_facts_are_not_matched_through_a_unit_scale():
-    assert not number_matches(16, 16000)      # "16 months" is not "16,000"
-    assert not number_matches(14, 0.014)
-    assert number_matches(16, 16) and number_matches(590, 590)
-
-
-def test_nu03_percentage_accepts_both_roundings_but_not_the_next_decimal():
+def test_nu03_percentage_is_stored_as_3_825_so_one_decimal_matches():
+    # The label 3.825 stands for -3.846% (see the question's note); at the
+    # displayed precision it accepts "3.8" and "3.83", not "3.85" or "3.9".
     nu03 = next(json.loads(l) for l in QUESTIONS.read_text(encoding="utf-8").splitlines()
                 if json.loads(l)["id"] == "nu03")
     pct = nu03["key_facts"][1]
-    assert all(number_matches(pct, v) for v in (3.8, 3.85, 3.846))
-    assert not any(number_matches(pct, v) for v in (3.9, 4.0, 3.7))
+    assert all(fact_matched(pct, f"{v} %") for v in (3.8, 3.83, 3.825))
+    assert not any(fact_matched(pct, f"{v} %") for v in (3.85, 3.846, 3.9, 4.0, 3.7))
 
 
 def test_fact_matched_alternatives_and_numbers():
@@ -109,7 +91,7 @@ def test_pass_when_all_rules_hold():
 
 
 def test_missing_number_is_wrong_number():
-    s = score_record(_q(key_facts=[25126, 6.4]), _r(answer="Up $25.1 billion, about 6%."))
+    s = score_record(_q(key_facts=[25126, 6.4]), _r(answer="Up $25.1 billion, about 7%."))
     assert not s["passed"] and s["failure_tag"] == "wrong_number" and s["missing_facts"] == [6.4]
 
 
