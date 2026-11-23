@@ -1,6 +1,6 @@
 # Results: `r125e--groq-openai-gpt-oss-120b.jsonl`
 
-Success = all key facts present (numbers ±1%), cited when answering, refusal exactly when expected, no forbidden string. Full definition: `eval/score.py`. Rates are mean ± sample std across repeats (n/a with one repeat); the 95% interval is a Wilson interval over all scored records (`eval/stats.py`).
+Success = all key facts present (numbers at the precision the answer shows), cited when answering, refusal exactly when expected, no forbidden string. Full definition: `eval/score.py`. Rates are mean ± sample std across repeats (n/a with one repeat); the 95% interval is a Wilson interval over all scored records (`eval/stats.py`).
 
 ## Workflow vs agent (paired)
 

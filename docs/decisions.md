@@ -321,3 +321,59 @@ behind them is old.
   file names.
 - **Tests:** 301 to 307 (grounded-rag provenance, `eval/cost.py` edge cases,
   `check_run --provider`, `RR_MAX_SEARCH_K=0`).
+
+## 2026-11-23: Numbers are compared at the precision the answer shows
+
+- **What:** a number of the answer matches a numeric key fact when the fact,
+  rounded (half up, on the decimal value) to the decimals and the scale written
+  in the answer, equals the number written. This replaces the ±1% band of
+  `eval/score.py`. "8,0 billion" matches 7,979 (millions) and "6 %" matches 6.4;
+  "15 413" does not match 15 421, nor does "6.5" or "6.42" match 6.43. A scale
+  word or suffix (million, billion, B, bn, Mrd, miljard and others) is applied,
+  and a fact of 1000 or more may be read as units, thousands or millions. A
+  number is always also tried as written, because a fact's unit is not known.
+  The LLM judge's rubric says the same (new `RUBRIC_ID`).
+- **Why:** a ±1% band is the wrong test of "same number". It accepted 15 413 for
+  15 421 (shown before the fix) and rejected a rounding to the digits the answer
+  claims. Reading the answer at its own precision accepts honest rounding and
+  rejects a wrong digit.
+- **Numbers:** re-scored offline from the stored answers (no LLM call), 3
+  records go from fail to pass and none from pass to fail, all "6 %" for the 6.43%
+  of `nu01`: `r122e` agent 30/40 to 31/40, `r126e` agent 95/120 to 97/120 (2
+  repeats), `r125e` unchanged. The question asks for one decimal; "6 %" is
+  accepted by the rule, not by the question's wording. The majority over 40: `r122e`
+  agent 30 to 31, `r126e` agent 32 to 33; `r126e` McNemar p from 0.625 to 0.25
+  (0 against 3 discordant questions). Cost per correct answer: `r126e` agent
+  $0.00195 to $0.00191, `r122e` agent $0.00212 to $0.00205. Earlier entries
+  quote the figures of their day.
+- **Limit:** a one-digit answer is accepted over a wide range ("6 %" for 6.4 and
+  also for 5.6). The label of `nu03` is 3.825 for a true 3.846%: "3.8" passes,
+  "3.85" fails, which the precision rule would accept for the true value. The
+  question file is left as it is.
+
+## 2026-11-23: A refusal that cites its sources is still a refusal
+
+- **What:** `rr/refusal.py::detect_refusal`, used by `rr/common.py::is_refusal`
+  at run time and by `eval/score.py` when scoring (the recorded `refused` flag
+  OR the answer text). An answer is a refusal when every sentence is a refusal,
+  or when its first sentence is a strong refusal and the rest only describes what
+  the sources contain, with or without `[S#]` markers. A hesitation followed by a
+  claim ("I'm not sure, but revenue was 416 billion [S1].") is an answer, as is a
+  claim before the refusal sentence. `cited_refusal` is in the result record and
+  in the score. Before, only grounded-rag's exact sentence counted, and only
+  without a valid citation.
+- **Languages:** strong phrases in English, French, Dutch, Spanish and German,
+  tested one by one. The run's own stop messages ("I stopped before finishing")
+  are not refusals. The semantics follow grounded-rag's `answer_metrics.is_refusal`
+  (strong phrase, negation about the sources, first sentence); the code is
+  written here and does not import it, because the pin is not that branch.
+  A test checks that every exact refusal sentence of the pinned grounded-rag is
+  detected.
+- **Numbers:** on the 560 stored records of `r122e`, `r125e` and `r126e` no
+  `refused` value changes and none is a cited refusal, so no verdict moves for
+  this reason.
+- **Limit:** "I don't know. The documents say revenue was 416 billion [S1]."
+  counts as a refusal, as decided: a strong refusal followed by a description of
+  the sources. On a real answer set it would be worth reading these by eye.
+- **Tests:** 307 to 359 (number rule, refusal rule in five languages, the
+  hesitation-then-claim guard, `cited_refusal`).
