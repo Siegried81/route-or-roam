@@ -6,18 +6,22 @@
 
 On 40 grounded questions (Apple's FY2025 10-K and the EU AI Act), the agent
 passes more than the workflow in both runs, 99 against 85 records of 120 and
-then 95 against 88, and uses about 1.5 times the tokens per correct answer.
-The gap is not statistically significant, and a bad search caps both systems.
+then 95 against 88. The gap is not statistically significant, and a bad search
+caps both systems. The agent uses about 1.5 times the tokens per correct answer
+but the same dollars (about $0.002), and its slowest runs are slower: p95
+latency 25 to 29 s against 9 to 13 s.
 
 [grounded-rag](https://github.com/Siegried81/grounded-rag) is the RAG engine,
 route-or-roam is the test bench. Retrieval, the answer prompt and the verifier
-come from grounded-rag, imported in place, never copied.
+come from grounded-rag, imported in place, never copied. CI and the Docker
+image pin it at commit 3b2de9f; the two published runs used older commits (see
+[Limits](#limits)).
 
 ## Workflow or agent
 
 - **Workflow** (`rr/workflow.py`): code fixes the route, at most 4 LLM calls. Pick it when cost and latency must be bounded, or when the process has to be strict and auditable.
-- **Agent** (`rr/agent.py`): a ReAct agent that chooses its tools and how often. Pick it when questions cross several sources: cross-corpus questions passed 10/18 against 4/18 in `r125e`.
-- **Either way the search is the ceiling.** In `r125e` the workflow refused 15 answerable questions, and in 14 of them a source the answer needed never came back from retrieval (12 of 15 in `r126e`). Fix retrieval before choosing a design.
+- **Agent** (`rr/agent.py`): a ReAct agent that chooses its tools and how often. Pick it when questions cross several sources: cross-corpus questions passed 10/18 against 4/18 in `r125e`, but 8/18 against 6/18 in `r126e`.
+- **Either way the search is the ceiling.** In `r125e` 15 of the workflow's 120 records were wrong refusals of answerable questions, and in 14 of them a source the answer needed never came back from retrieval (12 of 15 in `r126e`). Fix retrieval before choosing a design.
 - In dollars the two cost about the same per correct answer: output tokens cost four times the input, and the workflow writes about twice the output of the agent.
 
 ## What a correct answer costs
@@ -58,11 +62,12 @@ so part of the gap may be search depth, not autonomy. More in
 ## Stack
 
 - **Core**: Python 3.12, LangGraph (both systems are graphs; state checkpointed in SQLite), Pydantic.
-- **Model**: Groq `openai/gpt-oss-120b`, with a rotation over up to 5 Groq keys.
-- **Retrieval**: grounded-rag (hybrid search, answer prompt, verifier).
-- **Interfaces**: FastAPI, React (Vite), Streamlit, a CLI.
+- **Model**: Groq `openai/gpt-oss-120b` for the published runs (`.env.example` defaults to `openai/gpt-oss-20b`), with a rotation over up to 5 Groq keys; a local Ollama model is supported.
+- **Retrieval**: grounded-rag (hybrid search with BM25 and embeddings, answer prompt, verifier), reached through `sys.path`.
+- **Interfaces**: FastAPI with uvicorn, React 19 (Vite), Streamlit, a CLI.
 - **Delivery**: Docker, Docker Hub, Render (API and UI), Streamlit Community Cloud.
-- **Quality**: pytest (offline), GitHub Actions CI, Dependabot.
+- **Quality**: pytest (offline), GitHub Actions CI, Dependabot; optional LangSmith traces.
+- **Measurement**: scoring, Wilson intervals, exact McNemar test and cost per correct answer in `eval/`; reports and charts with matplotlib.
 - **Eval runs**: a cloud sandbox in Docker for the long runs, one Groq key per worker.
 
 ## Run it
@@ -74,7 +79,7 @@ with its indexes built and its embedder reachable (by default a local Ollama wit
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.lock -r requirements-dev.txt
-cp .env.example .env               # GROQ_API_KEY .. _5, RR_GROQ_MODEL
+cp .env.example .env               # GROQ_API_KEY .. _5; RR_GROQ_MODEL (openai/gpt-oss-120b for the published runs)
 
 python cli.py ask --system workflow "What were Apple's total net sales in fiscal 2025?"
 python cli.py ask --system agent --approve "Quand s'appliquent les obligations haut risque ? Save a report."
@@ -83,7 +88,7 @@ python -m uvicorn api.main:app --port 8001      # React UI backend
 cd web && npm install && npm run dev            # http://localhost:5181
 python -m streamlit run app.py                  # Streamlit alternative, port 8501
 
-python -m pytest -q                             # 301 tests, offline
+python -m pytest -q                             # 307 tests, offline
 ```
 
 An eval run, its resume, its check and its report: [docs/running_an_eval.md](docs/running_an_eval.md).
@@ -102,5 +107,5 @@ against free-tier limits. Each is described in the
 
 - Three repeats of 40 questions on one model, 3 to 10 questions per type. The 120 records of a system are 40 questions asked three times, not 120 independent draws; on the 40 questions the 95% interval is 57-84% (workflow) and 68-91% (agent) in `r125e`.
 - Wrong refusals are mostly retrieval misses: one short chunk (Article 113) holds the AI Act's application dates and rarely ranks. Both systems share that retrieval.
-- Runs differ in grounded-rag version (`r125e` 80ef892, `r126e` e9535b2); CI and the image pin 3b09461, whose verifier is stricter on negations and thousands separators. New runs record their versions in each record. Earlier runs (`r120e` to `r124e`) are not comparable ([decisions](docs/decisions.md)).
+- Runs differ in grounded-rag version (`r125e` 80ef892, `r126e` e9535b2), and neither is the pin, 3b2de9f. Between 80ef892 and the pin the verifier reads negations and thousands separators more strictly; between the previous pin (3b09461) and 3b2de9f the chunks of both corpora are identical. Nothing has been rerun on the pin, so the published figures are not a measure of the pinned code. New runs record their versions in each record. Earlier runs (`r120e` to `r124e`) are not comparable ([decisions](docs/decisions.md)).
 - Latency mostly measures free-tier rate-limit waits. Scoring is string and number matching; the opt-in LLM judge (`eval/judge.py`) has not been run on the published records. The verifier is lexical.

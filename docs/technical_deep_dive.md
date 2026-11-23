@@ -329,7 +329,10 @@ published records: its agreement with a human reader is unmeasured.
 - **Known cost first**: pending calls and the worst case (calls × `RR_MAX_STEPS`,
   calls × `RR_MAX_TOKENS`) are printed; `--estimate` stops there.
 - **Self-describing records**: `provider`, `model`, `llm_cache`, `max_steps`,
-  `max_tokens` travel with every record, which are stored unscored.
+  `max_tokens`, `max_search_k`, `workflow_search_k` and the provenance
+  (`code_sha`, `code_dirty`, `grounded_rag_sha`, `grounded_rag_dirty`,
+  `questions_sha256`) travel with every record, which are stored unscored.
+  `r125e` and `r126e` predate the last two groups and carry neither.
 - **Dead letter**: an exception from `answer_question`, or a `TransientLLMError`
   (a quota says nothing about the system and would weigh on the one that makes
   more calls), goes to `runs/dead_letter.jsonl` and is retried on resume. Other
@@ -380,7 +383,8 @@ metric. A report is rebuilt with `python -m eval.report --runs <records>
 
 ### 9.1 Where the failures come from
 
-- **Workflow refusals.** It refused 15 answerable questions in each run. Replay
+- **Workflow refusals.** 15 of its 120 records were wrong refusals of answerable
+  questions in each run. Replay
   of the recorded searches (retrieval is deterministic) showed that in 14 of the
   15 in `r125e` a source the answer needed never came back: Article 113's dates
   for sh09, cc06, cc02 and mh07, and nu05, whose DMA fine limit is in Apple's
@@ -424,11 +428,15 @@ python -m eval.compare_runs runs/r122e--groq-openai-gpt-oss-120b.jsonl \
     runs/r125e--groq-openai-gpt-oss-120b.jsonl runs/r126e--groq-openai-gpt-oss-120b.jsonl
 ```
 
-`r125e` ran on 80ef892, `r126e` on e9535b2. CI and the image pin 3b09461 since
-23 November: same retrieval as 80ef892, a verifier that reads "n't" negations and
-thousands separators more strictly, and a system prompt that is unchanged.
-route-or-roam passes its own grounding bar, so grounded-rag's new default (0.30)
-does not apply to it.
+`r125e` ran on 80ef892, `r126e` on e9535b2. CI and the image pin 3b2de9f since
+23 November (3b09461 earlier that day). Against 80ef892: same retrieval, a
+verifier that reads "n't" negations and thousands separators more strictly, and
+a system prompt that is unchanged. Against 3b09461, only a `filings_statements`
+corpus that route-or-roam does not search, a line chunker used only for files
+that start with `Context:` (none in the two corpora), and a `.env` lookup
+limited to grounded-rag's own folder: both corpora chunk to the same 155 and 878
+chunks. Neither published run was made on the pin. route-or-roam passes its own
+grounding bar, so grounded-rag's new default (0.30) does not apply to it.
 
 ### 9.4 Earlier runs
 
@@ -439,7 +447,7 @@ the agent scored 9/17 against the workflow's 15/17, and 7 of its 8 failures were
 Groq rejecting a `search_documents` call with `k=10` because the published schema
 capped `k` at 8 (HTTP 400, `/k: maximum: got 10, want 8`; the corrective retry
 failed the same way). The cap moved into code (`SearchArgs.k` has no `le` bound,
-the search uses `capped_k = min(k, 8)`, with a test) and the agent scored 15/17.
+the search uses `capped_k = min(k, settings.MAX_SEARCH_K)`, 8 by default, with a test) and the agent scored 15/17.
 The other failure, cc02, was a citation written with a zero-width space inside
 `[S2]`, now handled by grounded-rag's `normalize_citations`. The other runs,
 `r120e` to `r124e`, are summarised in `docs/decisions.md` (`r124e` stopped at
@@ -487,7 +495,7 @@ They don't say:
   calculator, an identifier like "10-K"). It costs a retry, which can end in a
   refusal.
 - Temperature is 0, but hosted models are not perfectly deterministic.
-- Real runs need grounded-rag's indexes and embedder; the 301 tests are offline.
+- Real runs need grounded-rag's indexes and embedder; the 307 tests are offline.
 
 Next: more questions per type (§10); a cross-model run on `gpt-oss-20b`,
 `gpt-oss-120b` and a local Ollama model (the harness exists, §8.4), with a
