@@ -12,8 +12,19 @@ AI Act (25 only, 14 crossed), 35 touch the 10-K (21 only). Ids continue the v1 n
 (`sh11`..`sh22`, `mh11`..`mh22`, `nu09`..`nu18`, `cc07`..`cc20`, `un04`..`un09`, `in04`..`in09`), so
 v1 + v2 can be concatenated into 100 questions with unique ids.
 
-**Format.** Same fields as `questions.jsonl`. `note` holds the exact source sentences, and for
-computed answers the arithmetic after `computed:`.
+**Format.** Same fields as `questions.jsonl`, plus an optional `min_decimals` (integer): when present, a
+number in the answer only counts if it shows at least that many decimals ("6 %" is refused for a fact
+asked "to one decimal"). It is set on every question whose wording asks for a precision
+(`one decimal` gives 1, `two decimals` gives 2). Numeric facts are stored at full precision, as
+printed in the source or computed exactly from it (a ratio keeps six decimals), so a more precise
+answer is not penalised. `note` holds the exact source sentences, and for computed answers the
+arithmetic after `computed:`.
+
+**Review (2026-11-23).** An independent review rewrote or corrected 31 questions before the run: the
+cross-corpus questions that only juxtaposed two unrelated facts (cc12 to cc20, mh20) now link the
+two corpora by subject; four multi-hop questions that one article could answer alone (mh11, mh14 to
+mh17, mh21) now need both sources; weak facts (cc17 "yes" and "60", mh22) were replaced; alias gaps
+(sh13, sh15, nu11, cc09) were filled.
 
 **Use.**
 ```

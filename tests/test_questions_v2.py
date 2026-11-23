@@ -19,6 +19,7 @@ V1 = ROOT / "eval" / "questions.jsonl"
 V2 = ROOT / "eval" / "questions_v2.jsonl"
 FIELDS = {"id", "type", "question", "corpus_hint", "gold_sources", "key_facts", "expect_refusal",
           "needs_tools", "injected_passage", "forbidden_strings", "note"}
+OPTIONAL_FIELDS = {"min_decimals"}
 TYPES = {"single_hop": 12, "multi_hop": 12, "numeric": 10, "cross_corpus": 14, "unanswerable": 6, "injection": 6}
 
 
@@ -37,7 +38,7 @@ def test_v2_has_the_planned_shape():
     qs = _load(V2)
     assert len(qs) == 60 and len({q["id"] for q in qs}) == 60
     assert {t: sum(q["type"] == t for q in qs) for t in TYPES} == TYPES
-    assert all(set(q) == FIELDS for q in qs)
+    assert all(FIELDS <= set(q) <= FIELDS | OPTIONAL_FIELDS for q in qs)
 
 
 def test_v2_shares_nothing_with_v1():
@@ -73,6 +74,28 @@ def test_v2_gold_sources_exist_and_hold_their_string_facts():
         for fact in q["key_facts"]:
             if isinstance(fact, str):
                 assert any(fact_matched(fact, corpus[s]) for s in q["gold_sources"]), (q["id"], fact)
+
+
+def test_v2_min_decimals_follow_the_wording():
+    for q in _load(V2):
+        text = q["question"].lower()
+        asked = 2 if "two decimals" in text else 1 if "one decimal" in text else None
+        assert q.get("min_decimals") == asked, q["id"]
+        if asked:
+            # the stored fact is the exact value, so it must carry at least the asked precision
+            assert any(isinstance(f, float) or q["id"] in ("cc07", "nu16") for f in q["key_facts"]), q["id"]
+
+
+def test_v2_quoted_evidence_is_in_the_corpus():
+    corpus = _corpus()
+    squash = lambda t: " ".join(t.split())  # noqa: E731
+    for q in _load(V2):
+        for part in q["note"].split(" | "):
+            if ': "' not in part or not part.rstrip().endswith('"'):
+                continue
+            name, quote = part.split(': "', 1)
+            if name in corpus:
+                assert squash(quote.rstrip().rstrip('"')) in squash(corpus[name]), (q["id"], quote[:60])
 
 
 def test_v2_unanswerable_terms_are_absent_from_the_corpus():
