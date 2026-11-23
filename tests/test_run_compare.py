@@ -128,7 +128,8 @@ def test_filters_and_cli(tmp_path, monkeypatch):
                       "--questions", str(qfile), "--runs-dir", str(tmp_path)])
     assert [c[0] for c in fake.calls] == ["workflow", "workflow"]
     rows = _lines(tmp_path / "cli.jsonl")
-    assert all({"provider", "model", "llm_cache", "max_steps", "max_tokens"} <= set(r) for r in rows)
+    assert all({"provider", "model", "llm_cache", "max_steps", "max_tokens",
+                "max_search_k", "workflow_search_k"} <= set(r) for r in rows)
 
 
 def test_estimate_prints_the_worst_case_and_makes_no_call(tmp_path, monkeypatch, capsys):

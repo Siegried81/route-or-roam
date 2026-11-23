@@ -16,8 +16,10 @@ the difference:
   tools to call, with what arguments and how many times. Code only guards it.
 
 Both are LangGraph graphs over the same tool registry, fenced prompts, budget,
-verifier and LLM client, so the only variable is the control flow. Retrieval,
-the answer prompt and verification come from [grounded-rag](https://github.com/Siegried81/grounded-rag),
+verifier and LLM client, but the comparison is not strictly one variable: the
+workflow searches at k=4 in one pass, the agent up to 8 per search. An ablation
+(agent capped at k=4, `RR_MAX_SEARCH_K=4`) isolates that and has not been run
+yet (about 1 million Groq tokens). Retrieval, the answer prompt and verification come from [grounded-rag](https://github.com/Siegried81/grounded-rag),
 imported in place, never copied.
 
 ## The two graphs
@@ -206,7 +208,7 @@ python -m eval.report --runs runs/m1--groq-openai-gpt-oss-20b.jsonl runs/m1--gro
 python -m eval.judge --runs runs/r1.jsonl --estimate            # opt-in LLM judge: one call per record
 python -m eval.judge --runs runs/r1.jsonl                       # -> runs/r1.judge.jsonl (resumable)
 python -m eval.report --runs runs/r1.jsonl --judge runs/r1.judge.jsonl   # adds the judge rows
-python -m pytest -q                                             # 291 tests, offline
+python -m pytest -q                                             # 292 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`

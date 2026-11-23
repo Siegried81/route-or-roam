@@ -11,7 +11,7 @@ deployment in [deploy.md](deploy.md), dated decisions in
 The question is narrow on purpose: **with the same questions, tools and
 model, when does an agent beat a fixed workflow, and what does it cost?**
 
-1. **Only the control flow differs.** Both systems share the tool registry,
+1. **The control flow is the intended difference.** Both systems share the tool registry,
    prompts, fence, budget, verifier, LLM client and result contract. A special
    case in a shared module would stop the comparison being like for like.
 2. **Code owns the boundaries.** The model may propose anything; code decides
@@ -44,7 +44,7 @@ cli.py / app.py (Streamlit) / api + web (React)        eval/run_compare.py
 ### 2.1 Why both systems are LangGraph graphs
 
 A workflow does not need a graph library. It is one anyway so the comparison
-mixes only one variable: both share `RunState`, `llm_step`, `run_tool` and the
+isolates the control flow as far as possible: both share `RunState`, `llm_step`, `run_tool` and the
 trace and checkpoint machinery, and differ only in who chooses the next edge,
 Python (A) or the model's tool calls (B). The graphs are drawn in the README.
 
@@ -60,7 +60,11 @@ Python (A) or the model's tool calls (B). The graphs are drawn in the README.
   agent picks its own `k`: it asked for 10, capped to 8, on 209 of 238 searches
   in `r125e`. The workflow stays at 4 because 4 searches at k=8 would overrun the
   12k-token budget and Groq's 8k request limit. This is a real difference in
-  retrieval depth, paid for by the agent in tokens.
+  retrieval depth, paid for by the agent in tokens, so the agent-vs-workflow gap
+  mixes the loop with twice the passages per search. The ablation that
+  separates them gives the agent the workflow's depth (`RR_MAX_SEARCH_K=4`,
+  recorded on every record as `max_search_k`, with `workflow_search_k`). It has
+  not been run yet: about 1 million Groq tokens for 120 agent records.
 - **calculate**: only when the plan says so and passages exist. One call
   writes 1 to 3 expressions (a percentage change needs the difference and the
   ratio) and the safe calculator evaluates each; `days_between("YYYY-MM-DD",
@@ -141,7 +145,7 @@ in English.
 
 | tool | arguments (Pydantic, `extra="forbid"`) | notes |
 |---|---|---|
-| `search_documents` | `query` (1-500 chars), `corpus` (enum), `k` (≥ 1, default 4; capped at 8 in code, see 9.4) | hybrid retrieval; results fenced |
+| `search_documents` | `query` (1-500 chars), `corpus` (enum), `k` (≥ 1, default 4; capped in code at `RR_MAX_SEARCH_K`, 8 by default, see 9.4) | hybrid retrieval; results fenced |
 | `list_sections` | `corpus` | section file names |
 | `calculate` | `expression` (1-200 chars) | whitelisted AST evaluator |
 | `save_report` | `title` (1-120), `markdown` (1-20,000) | needs human approval |
@@ -451,7 +455,7 @@ They don't say:
   calculator, an identifier like "10-K"). It costs a retry, which can end in a
   refusal.
 - Temperature is 0, but hosted models are not perfectly deterministic.
-- Real runs need grounded-rag's indexes and embedder; the 291 tests are offline.
+- Real runs need grounded-rag's indexes and embedder; the 292 tests are offline.
 
 Next: more questions per type (§10); a cross-model run on `gpt-oss-20b`,
 `gpt-oss-120b` and a local Ollama model (the harness exists, §8.4), with a

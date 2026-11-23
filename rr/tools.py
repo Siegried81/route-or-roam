@@ -34,10 +34,6 @@ class _Args(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-#: Most passages one search may return; larger requests are capped, not rejected.
-MAX_SEARCH_K = 8
-
-
 class SearchArgs(_Args):
     query: str = Field(min_length=1, max_length=500, description="What to look for.")
     corpus: Corpus = Field(description="Which document collection to search.")
@@ -45,14 +41,21 @@ class SearchArgs(_Args):
     # the published JSON schema and rejects the whole call when gpt-oss asks for
     # k=10 against a maximum of 8. That rejection caused 7 of 17 agent failures
     # in the first measured run. The cap is enforced in code instead
-    # (`capped_k`), so an over-eager k still searches, with at most 8 passages.
-    k: int = Field(default=settings.SEARCH_K, ge=1,
-                   description=f"Passages to return (at most {MAX_SEARCH_K}).")
+    # (`capped_k`), so an over-eager k still searches, with at most
+    # settings.MAX_SEARCH_K passages (8 unless RR_MAX_SEARCH_K says otherwise).
+    # The schema text is built each time `tool_schemas()` asks for it, so the
+    # number the model is told is the cap in force, not the one read at import.
+    k: int = Field(default=settings.SEARCH_K, ge=1, description="Passages to return.",
+                   json_schema_extra=lambda schema: schema.update(
+                       description=f"Passages to return (at most {settings.MAX_SEARCH_K})."))
 
     @property
     def capped_k(self) -> int:
-        """`k` limited to MAX_SEARCH_K, the most passages one search returns."""
-        return min(self.k, MAX_SEARCH_K)
+        """`k` limited to settings.MAX_SEARCH_K, the most passages one search returns.
+
+        Read at call time, so the cap a run records is the cap it applied.
+        """
+        return min(self.k, settings.MAX_SEARCH_K)
 
 
 class ListSectionsArgs(_Args):

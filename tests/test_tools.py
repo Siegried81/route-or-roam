@@ -1,8 +1,10 @@
 """Tool registry: allowlist, argument validation, sids, approval gate, calculator."""
 
+import importlib.util
+
 import pytest
 
-from rr import grounded
+from rr import grounded, settings
 from rr.tools import INJECTED_SOURCE, run_tool, safe_calculate, tool_schemas
 
 
@@ -123,9 +125,33 @@ def test_search_k_above_the_cap_is_capped_not_rejected(monkeypatch):
     monkeypatch.setattr(grounded, "search_corpus", fake_search)
     schema = next(s for s in tools.tool_schemas() if s["function"]["name"] == "search_documents")
     assert "maximum" not in schema["function"]["parameters"]["properties"]["k"]
+    # The default cap, whatever RR_MAX_SEARCH_K says in the shell running the tests:
+    # a fresh copy of settings.py read with the variable removed.
+    monkeypatch.delenv("RR_MAX_SEARCH_K", raising=False)
+    spec = importlib.util.spec_from_file_location("settings_default", settings.__file__)
+    default = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(default)
+    assert default.MAX_SEARCH_K == 8
+    monkeypatch.setattr(settings, "MAX_SEARCH_K", default.MAX_SEARCH_K)
     args = tools.SearchArgs(query="net sales", corpus="filings_sections", k=10)
-    assert args.capped_k == tools.MAX_SEARCH_K
+    assert args.capped_k == 8
     tools.SearchArgs(query="q", corpus="filings_sections", k=3)  # below the cap stays valid
+
+
+def test_search_cap_follows_settings_for_the_k4_ablation(monkeypatch):
+    """RR_MAX_SEARCH_K=4 must reach the retriever: the agent's k=10 searches 4 passages, not 8."""
+    from rr import tools
+
+    seen = []
+    monkeypatch.setattr(grounded, "search_corpus", lambda query, corpus, k: seen.append(k) or [])
+    monkeypatch.setattr(settings, "MAX_SEARCH_K", 4)
+    run_tool("search_documents", {"query": "net sales", "corpus": "filings_sections", "k": 10}, [])
+    run_tool("search_documents", {"query": "net sales", "corpus": "filings_sections", "k": 3}, [])
+    assert seen == [4, 3]
+    schema = next(s for s in tools.tool_schemas() if s["function"]["name"] == "search_documents")
+    assert "at most 4" in schema["function"]["parameters"]["properties"]["k"]["description"]
+    assert tools.prefetch_search({"query": "q", "corpus": "filings_sections", "k": 10}) == []
+    assert seen[-1] == 4
 
 
 @pytest.mark.parametrize("expr, expected", [

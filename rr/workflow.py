@@ -130,7 +130,8 @@ def build_workflow(llm):
         Depth is `settings.WORKFLOW_SEARCH_K` per search (4 by default): the
         workflow's calls each carry every passage, so 4 searches at k=8 would
         overrun the 12k-token budget and Groq's 8k-token free-tier request
-        limit. The agent picks its own k (up to 8) and pays for it in tokens.
+        limit. The agent picks its own k (up to settings.MAX_SEARCH_K, 8 by
+        default) and pays for it in tokens.
 
         Retrieval is local (embeddings and indexes, no rate limit), so the calls
         are fetched in parallel; the results are then registered one call at a

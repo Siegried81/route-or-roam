@@ -261,3 +261,16 @@ behind them is old.
 - **Replay of the workflow's false refusals,** same index, recorded queries:
   `r126e` on e9535b2, 12 of 15 miss a gold source the answer needed (only sh08
   got none at all); `r125e` on 80ef892, 14 of 15. No LLM call.
+
+## 2026-11-23: Search depth cap made configurable, for a k=4 agent ablation
+
+- **What:** the most passages one search returns is `RR_MAX_SEARCH_K`
+  (`settings.MAX_SEARCH_K`, default 8, the old hard-coded value). Run records
+  store `max_search_k` and `workflow_search_k`.
+- **Why:** in `r125e`, 209 of the agent's 238 searches asked for k=10 and got 8;
+  the workflow always searches at 4. So the agent's lead mixes the loop with
+  twice the depth. `RR_MAX_SEARCH_K=4` separates them. Raising `RR_MAX_TOKENS`
+  instead would break the shared budget.
+- **State:** nothing published changes. The ablation is not run yet (about 1M
+  Groq tokens for 120 agent records). If the lead holds, the loop explains it;
+  if it vanishes, retrieval depth does and the README must say so.
