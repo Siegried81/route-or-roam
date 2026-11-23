@@ -95,6 +95,14 @@ EVAL_MODELS = os.getenv("RR_EVAL_MODELS", "")
 MAX_STEPS = int(os.getenv("RR_MAX_STEPS", "8"))       # LLM calls per run
 MAX_TOKENS = int(os.getenv("RR_MAX_TOKENS", "12000"))  # prompt + completion tokens per run
 SEARCH_K = 4
-# Passages per workflow search. The agent chooses its own k (capped at 8 in
-# rr/tools.py); the workflow stays at 4 so its fixed calls fit the token budget.
+# Most passages one search may return, for either system (rr/tools.py caps any
+# larger k to it). The agent chooses its own k and asks for 10 almost every
+# time, so this cap is its real retrieval depth: 8 by default, as in every
+# published run. RR_MAX_SEARCH_K=4 gives the agent the workflow's depth, so a
+# run compares the two architectures and not two retrieval depths.
+MAX_SEARCH_K = int(os.getenv("RR_MAX_SEARCH_K", "8"))
+if MAX_SEARCH_K < 1:
+    raise ValueError(f"RR_MAX_SEARCH_K must be at least 1, got {MAX_SEARCH_K}")
+# Passages per workflow search. The workflow stays at 4 so its fixed calls fit
+# the token budget; a value above MAX_SEARCH_K is capped to it.
 WORKFLOW_SEARCH_K = int(os.getenv("RR_WORKFLOW_SEARCH_K", str(SEARCH_K)))

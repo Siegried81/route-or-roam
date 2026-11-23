@@ -83,7 +83,12 @@ flowchart LR
   stays at 4 because each of its calls carries every passage: 4 searches at
   k=8 would overrun the 12k-token budget and Groq's 8k-token free-tier request
   limit. This is a real difference in retrieval depth, paid for by the agent
-  in tokens; the knob lets a run test the workflow at k=8.
+  in tokens, and it means the published agent-vs-workflow gap mixes two
+  effects: the loop, and twice the passages per search (in `r125e`, 209 of
+  the agent's 238 searches asked for k=10 and got 8). Two knobs separate them:
+  `RR_WORKFLOW_SEARCH_K` tests the workflow at k=8, and `RR_MAX_SEARCH_K=4`
+  tests the agent at the workflow's depth. Every runs file records both
+  (`max_search_k`, `workflow_search_k`).
 - **calculate**: only when the plan says so and passages exist. The model
   writes 1 to 3 expressions over the fenced sources in one call (a percentage
   change needs the difference and the ratio; with one expression the model
@@ -188,7 +193,7 @@ Corpora:
 
 | tool | arguments (Pydantic, `extra="forbid"`) | notes |
 |---|---|---|
-| `search_documents` | `query` (1-500 chars), `corpus` (enum of the two), `k` (≥ 1, default 4; capped at 8 in code, see 9.3) | grounded-rag hybrid retrieval; results fenced |
+| `search_documents` | `query` (1-500 chars), `corpus` (enum of the two), `k` (≥ 1, default 4; capped in code at `RR_MAX_SEARCH_K`, 8 by default, see 9.3) | grounded-rag hybrid retrieval; results fenced |
 | `list_sections` | `corpus` | section file names |
 | `calculate` | `expression` (1-200 chars) | whitelisted AST evaluator |
 | `save_report` | `title` (1-120), `markdown` (1-20,000) | needs human approval |
@@ -681,8 +686,9 @@ system does.
 
 **The fix.** The cap moved out of the published schema and into code:
 `SearchArgs.k` keeps `ge=1` but has no `le` bound, and the search uses
-`capped_k = min(k, 8)` (`rr/tools.py`, with a test). An over-eager `k=10` now
-searches with 8 passages instead of being rejected by the provider. The
+`capped_k = min(k, settings.MAX_SEARCH_K)`, 8 by default (`rr/tools.py`, with a
+test). An over-eager `k=10` now searches with 8 passages instead of being
+rejected by the provider. The
 `cc02` citation (zero-width space) is now recognised too, through grounded-rag's
 extended `normalize_citations`. Re-running the agent gave the final state at the
 top of this section: 15/17.
@@ -783,7 +789,7 @@ by construction.
   words (a regulation described but not named) fails as `missed_hop`. The
   opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
   change it, and it is itself a model: its verdicts are a second opinion.
-- Real runs need grounded-rag's indexes and embedder; the tests (276, offline,
+- Real runs need grounded-rag's indexes and embedder; the tests (277, offline,
   scripted LLM, retrieval mocked) do not.
 
 ## 13. Roadmap

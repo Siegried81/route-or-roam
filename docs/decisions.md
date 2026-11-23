@@ -280,3 +280,26 @@ One dated entry per change that alters what the system promises. Append, never r
   grounded-rag's verifier (#34, a citation after the full stop now cites the
   sentence before it) all changed.
 
+## 2026-11-20: Search depth cap made configurable for a k=4 agent ablation
+
+- **What:** the most passages one search returns is now
+  `settings.MAX_SEARCH_K`, read from `RR_MAX_SEARCH_K` (default 8, the value
+  hard-coded in `rr/tools.py` until now). `SearchArgs.capped_k` reads it at
+  call time. `eval/run_compare.run_settings()` stores `max_search_k` and
+  `workflow_search_k` on every record.
+- **Why:** the agent-vs-workflow comparison is not one variable. In `r125e`
+  209 of the agent's 238 searches asked for k=10 and got 8 passages; the
+  workflow always searches at 4. The agent's lead (99/120 against 85/120) and
+  its 8 runs over the token budget both mix the loop with twice the retrieval
+  depth. A run with `RR_MAX_SEARCH_K=4` gives the agent the workflow's depth
+  and separates the two. Raising `RR_MAX_TOKENS` instead was rejected: the
+  shared budget is what makes the comparison fair.
+- **Numbers:** nothing published changes; the default keeps every past run's
+  behaviour. No run was made. An agent run of 120 records used about 1M Groq
+  tokens in `r125e` (7,674 in + 683 out on average), several days of one
+  organisation's 200K/day cap.
+  Tests: 276 -> 277 (`tests/test_tools.py::test_search_cap_follows_settings_for_the_k4_ablation`,
+  checked failing without the change).
+- **Revisit if:** the k=4 run shows the agent's lead holds (then the loop
+  explains it) or disappears (then retrieval depth does, and the README must
+  say so).

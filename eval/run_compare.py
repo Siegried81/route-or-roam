@@ -133,7 +133,11 @@ def model_run_id(run_id: str, provider: str, model: str) -> str:
 
 
 def run_settings(provider: str | None = None, model: str | None = None) -> dict:
-    """Provider, model, cache flag and budget of a run, stored with every record.
+    """Provider, model, cache flag, budget and search depth of a run, stored with every record.
+
+    The search depth (``max_search_k``, ``workflow_search_k``) is recorded
+    because it moves both the score and the token use: a runs file must say
+    which depth produced it.
 
     ``provider``/``model`` override the configured ones for a cross-model run.
     """
@@ -143,7 +147,8 @@ def run_settings(provider: str | None = None, model: str | None = None) -> dict:
     if model is None:
         model = settings.GROQ_MODEL if provider == "groq" else settings.OLLAMA_MODEL
     return {"provider": provider, "model": model, "llm_cache": settings.LLM_CACHE,
-            "max_steps": settings.MAX_STEPS, "max_tokens": settings.MAX_TOKENS}
+            "max_steps": settings.MAX_STEPS, "max_tokens": settings.MAX_TOKENS,
+            "max_search_k": settings.MAX_SEARCH_K, "workflow_search_k": settings.WORKFLOW_SEARCH_K}
 
 
 def estimate(pending: int, max_steps: int, max_tokens: int) -> str:
