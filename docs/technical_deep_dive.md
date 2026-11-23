@@ -46,7 +46,36 @@ cli.py / app.py (Streamlit) / api + web (React)        eval/run_compare.py
 A workflow does not need a graph library. It is one anyway so the comparison
 isolates the control flow as far as possible: both share `RunState`, `llm_step`, `run_tool` and the
 trace and checkpoint machinery, and differ only in who chooses the next edge,
-Python (A) or the model's tool calls (B). The graphs are drawn in the README.
+Python (A) or the model's tool calls (B). The two graphs:
+
+System A, the workflow:
+
+```mermaid
+flowchart LR
+    S([START]) --> trigger --> plan --> search
+    search -->|needs_math| calculate --> answer
+    search -->|no math| answer
+    answer --> verify
+    verify -->|failed, first attempt| answer
+    verify -->|ok, or second attempt| E([END])
+    plan -. budget / error .-> stop --> E
+    answer -. budget / error .-> stop
+```
+
+System B, the agent:
+
+```mermaid
+flowchart LR
+    S([START]) --> agent
+    agent -->|tool calls| guard
+    agent -->|final text, budget or error| finalize
+    guard -->|save_report| human_approval["human_approval (interrupt)"]
+    guard -->|allowed / blocked repeat| tools
+    guard -->|second repeat: loop| finalize
+    human_approval --> tools --> agent
+    finalize -->|verify failed, first time| agent
+    finalize --> E([END])
+```
 
 ### 2.2 System A: fixed workflow (`rr/workflow.py`)
 
@@ -360,6 +389,9 @@ metric. A report is rebuilt with `python -m eval.report --runs <records>
   cc03, cc04 once) and 12 of 15 again miss a gold source the answer needed (replayed
   on 23 November against e9535b2 with the same index; only sh08 got none). Those refusals measure retrieval, not the
   model's caution.
+- **Unanswerable questions**: both systems answered "not in the documents"
+  on all 9 runs in `r125e`; in `r126e` the workflow still does (9/9) and the
+  agent answers sh10 once instead of refusing (8/9).
 - **Questions nobody passes** (none of the 6 runs of a question): mh08, nu05,
   cc02, un03 in `r125e`; those plus cc03, cc05, in03 in `r126e`.
 - **Agent cost.** Its prompt grows by about 850 tokens per k=8 search (95%
@@ -455,7 +487,7 @@ They don't say:
   calculator, an identifier like "10-K"). It costs a retry, which can end in a
   refusal.
 - Temperature is 0, but hosted models are not perfectly deterministic.
-- Real runs need grounded-rag's indexes and embedder; the 292 tests are offline.
+- Real runs need grounded-rag's indexes and embedder; the 301 tests are offline.
 
 Next: more questions per type (§10); a cross-model run on `gpt-oss-20b`,
 `gpt-oss-120b` and a local Ollama model (the harness exists, §8.4), with a

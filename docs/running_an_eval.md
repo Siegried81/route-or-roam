@@ -28,8 +28,9 @@ ignoring `runs/` and `reports/`), `grounded_rag_sha` (`unknown` if
 model, cache flag, budget and search depth. A run with `code_dirty: true` ran on
 code that is not in any commit.
 
-**Report.**
+**Report and cost.**
 
 ```bash
 python -m eval.report --runs runs/r1.jsonl    # docs/results.md + chart
+python -m eval.cost runs/r1.jsonl --price-in 0.15 --price-out 0.60   # tokens and dollars per correct answer
 ```
