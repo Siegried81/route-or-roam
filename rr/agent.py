@@ -65,7 +65,7 @@ def _last_call_messages(state: RunState) -> list[dict]:
     # Only calls that ran (`ok`) are results: an invalid-arguments, tool-error
     # or blocked-repeat reply is not a number to hand over as exact.
     replies = [m for m in state["messages"] if m["role"] == "tool"]
-    calc = [m["content"] for m, call in zip(replies, state.get("tool_calls") or [])
+    calc = [m["content"] for m, call in zip(replies, state.get("tool_calls") or [], strict=True)
             if call["name"] == "calculate" and call.get("ok")]
     user = f"{fence.fence_all(state['passages'])}\n\n" if state["passages"] else ""
     user += "".join(f"Calculator result (exact): {c}\n" for c in calc)
@@ -156,7 +156,8 @@ def build_agent(llm, checkpointer=None):
             # Budget ran out or the model looped. Keep an already checked answer
             # (budget hit during the retry); otherwise end with the stop message.
             return {} if state.get("answer") and state.get("verify") else stop_updates(reason)
-        upd = check_answer(state["answer"], state["passages"])
+        upd = check_answer(state["answer"], state["passages"], question=state["question"],
+                           tool_calls=state["tool_calls"])
         if not upd["verify"]["ok"] and not state["retry_used"]:
             upd["retry_used"] = True
             upd["messages"] = state["messages"] + [

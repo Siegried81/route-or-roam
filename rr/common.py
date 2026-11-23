@@ -8,13 +8,14 @@ here, the comparison would no longer be like for like.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import TypedDict
 
 from rr import budget as budget_mod
 from rr import fence, grounded, settings
 from rr.llm import LLMError, call_with_backoff
-from rr.tools import ToolResult
+from rr.tools import ToolResult, safe_calculate
 
 BUDGET_MESSAGE = "I stopped before finishing: the run hit its step or token budget, so I won't guess."
 LOOP_MESSAGE = "I stopped before finishing: the run kept repeating the same tool call, so I won't guess."
@@ -125,12 +126,73 @@ def is_refusal(answer: str) -> bool:
     return found and not re.sub(r"[\W_]+", "", text)
 
 
-def check_answer(answer: str, passages: list[dict]) -> dict:
+#: Scales a calculator result may be written at: as computed, as a percentage,
+#: or expanded from thousands, millions, billions or trillions (25,126 computed
+#: on figures in millions, written "$25.1 billion", is 25126 x 1e6).
+_RESULT_SCALES = (1, 100, 1e3, 1e6, 1e9, 1e12)
+
+
+def calculator_values(tool_calls: list[dict] | None) -> list[float]:
+    """The results of the calculations that ran, recomputed from their recorded expressions.
+
+    The trace keeps each call's expression, not its output; the calculator is a
+    pure function, so recomputing gives the exact value the model was shown. A
+    rejected call (`ok` false) contributes nothing.
+    """
+    values = []
+    for call in tool_calls or []:
+        if call.get("name") != "calculate" or not call.get("ok"):
+            continue
+        try:
+            values.append(abs(float(safe_calculate(call["args"]["expression"]))))
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            continue
+    return values
+
+
+def _significant_digits(figure: str) -> int:
+    """How many significant digits a normalised figure is written with ("6.4" 2, "104700000000" 4)."""
+    digits = figure.replace(".", "").lstrip("0") if "." in figure else figure.strip("0")
+    return max(len(digits), 1)
+
+
+def is_calculator_result(figure: str, values: list[float]) -> bool:
+    """True when `figure` is one of `values`, at some scale, rounded as the figure is written.
+
+    "6.4" matches 6.42551 and "25100000000" matches 25126 (millions), because a
+    model rounds what it reports; 6.5 or 25.2 billion do not. A figure written
+    with a single significant digit ("100") would match a wide range by rounding,
+    so it counts only when equal to a result.
+    """
+    target = float(figure)
+    digits = _significant_digits(figure)
+    for value in values:
+        for scale in _RESULT_SCALES:
+            scaled = value * scale
+            if math.isclose(scaled, target, rel_tol=1e-9, abs_tol=1e-9):
+                return True
+            if digits >= 2 and scaled and math.isclose(float(f"{scaled:.{digits}g}"), target,
+                                                       rel_tol=1e-9):
+                return True
+    return False
+
+
+def check_answer(answer: str, passages: list[dict], *, question: str = "",
+                 tool_calls: list[dict] | None = None) -> dict:
     """Apply grounded-rag's cite-or-refuse rule and verifier to a draft answer.
 
     With no passages at all the answer becomes the refusal message, whatever the
     model wrote: an answer with no evidence is ungrounded by definition. Returns
     the updates for answer, refused, citations and verify.
+
+    grounded-rag's figure check fails any number a cited sentence states that
+    its source does not carry. Both systems here also compute, so two kinds of
+    figure are accepted on top of it: a result of a calculation that ran
+    (`tool_calls`), since a correct total or growth rate is in no source by
+    definition, and a number the question itself gives ("Article 50", "fiscal
+    2025"), which restates the user's premise rather than asserting a new fact.
+    Any other figure absent from the cited source still fails, arithmetic done
+    without the calculator included.
     """
     if not passages:
         answer = grounded.REFUSAL_MESSAGE
@@ -139,23 +201,37 @@ def check_answer(answer: str, passages: list[dict]) -> dict:
     answer = grounded.gr_answer.normalize_citations(answer)
     report = grounded.verify(answer, as_retrieved(passages))
     refused = not report.valid_citations and is_refusal(answer)
+    given = grounded.figures_in(question)
+    values = calculator_values(tool_calls)
+    unsupported = [n for n in report.unsupported_numbers
+                   if n not in given and not is_calculator_result(n, values)]
+    ok = report.ok or (not report.invalid_citations and not unsupported
+                       and report.grounding_score >= grounded.VERIFY_MIN_GROUNDING)
     return {
         "answer": answer,
         "refused": refused,
         "citations": [] if refused else [f"S{i}" for i in report.valid_citations],
-        "verify": {"ok": report.ok, "grounding": round(report.grounding_score, 3),
+        "verify": {"ok": ok, "grounding": round(report.grounding_score, 3),
                    "invalid_citations": report.invalid_citations,
-                   "uncited_sentences": report.uncited_sentences},
+                   "uncited_sentences": report.uncited_sentences,
+                   "unsupported_numbers": unsupported},
     }
 
 
 def verify_feedback(verify: dict) -> str:
-    """The message sent back for the single retry after a failed verification."""
+    """The message sent back for the single retry after a failed verification.
+
+    It names what failed, figures included: with only "unsupported claims" the
+    model could not tell what to fix and often took the refusal it was offered.
+    """
     problems = []
     if verify.get("invalid_citations"):
         problems.append(f"citations {verify['invalid_citations']} do not match any source id")
     if verify.get("grounding", 1) < grounded.VERIFY_MIN_GROUNDING:
         problems.append("too much of the answer is not supported by the cited sources")
+    if verify.get("unsupported_numbers"):
+        problems.append(f"the figures {', '.join(verify['unsupported_numbers'])} appear neither in "
+                        "the sources cited for them nor in a calculator result")
     return ("Your answer failed verification: " + ("; ".join(problems) or "unsupported claims")
             + ". Rewrite it using only the sources, citing each claim with its id, "
               f"or reply exactly: {grounded.REFUSAL_MESSAGE}")

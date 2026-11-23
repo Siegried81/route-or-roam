@@ -68,6 +68,27 @@ def _retry_after(resp) -> float | None:
     return min(waits) if waits else None
 
 
+_GROQ_LIMIT = re.compile(
+    r"organization `(org_\w{6})\w*`.*?\((\w+)\): Limit (\d+), Used (\d+), Requested (\d+)", re.S)
+
+
+def _limit_reason(resp) -> str:
+    """Why a 429 refused the call, short enough for a log line.
+
+    Groq's body names the limit (TPD, TPM, RPD...), how much of it is used and
+    the organisation it belongs to. Keeping that tells which account is out of
+    quota; without it every stop reads the same and the cause has to be guessed.
+    The organisation id is cut to its first characters and the key is never
+    included.
+    """
+    text = getattr(resp, "text", "") or ""
+    m = _GROQ_LIMIT.search(text)
+    if m:
+        org, kind, limit, used, requested = m.groups()
+        return f"{kind} used {used}/{limit}, requested {requested}, {org}"
+    return " ".join(text.split())[:80]
+
+
 @dataclass
 class ToolCall:
     """One function call requested by the model. `arguments` is the parsed JSON object;
@@ -261,7 +282,8 @@ class ChatLLM:
     def _post(self, payload: dict) -> dict:
         """One request, rotating keys on 429 (see `chat`); returns the JSON body."""
         waits: list[float] = []
-        for key in self.keys:
+        reasons: list[str] = []
+        for i, key in enumerate(self.keys, start=1):
             headers = {"Authorization": f"Bearer {key}"} if key else {}
             try:
                 resp = requests.post(f"{self.base_url}/chat/completions", json=payload,
@@ -272,6 +294,7 @@ class ChatLLM:
                 wait = _retry_after(resp)
                 if wait is not None:
                     waits.append(wait)
+                reasons.append(f"key {i}: {_limit_reason(resp)}")
                 continue  # this key is rate-limited: try the next one
             if resp.status_code >= 500:
                 raise TransientLLMError(f"server error {resp.status_code}")
@@ -281,7 +304,9 @@ class ChatLLM:
                 return resp.json()
             except ValueError as exc:
                 raise LLMError(f"reply is not JSON: {resp.text[:120]!r}") from exc
-        raise TransientLLMError("rate-limited on every configured key (429)",
+        # The fixed prefix stays first: the cloud run scripts and the dead-letter
+        # reading match on it, and the per-key reasons follow.
+        raise TransientLLMError("rate-limited on every configured key (429): " + "; ".join(reasons),
                                 retry_after=min(waits) if waits else None)
 
 

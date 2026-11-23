@@ -2,7 +2,7 @@
 
 Usage (from the project root):
     python -m eval.report --runs runs/r1.jsonl [--questions eval/questions.jsonl]
-                          [--out docs/results.md] [--png docs/success_by_type.png]
+                          [--out docs/results.md] [--png <chart, next to --out by default>]
                           [--judge runs/r1.judge.jsonl]
     python -m eval.report --runs runs/r1--A.jsonl runs/r1--B.jsonl --out runs/r1-models.md
         (one runs file per model, from ``eval.run_compare --models``)
@@ -410,6 +410,18 @@ def build_cross_report(runs_paths: list[Path], questions_path: Path, out_md: Pat
     return [agg for _, _, agg in entries]
 
 
+def default_png(out_md: Path) -> Path:
+    """Where the chart goes when --png is not given: next to the report it belongs to.
+
+    The markdown links the chart by file name, so it has to sit in the same
+    folder. The published page keeps its chart name (docs/results.md ->
+    docs/success_by_type.png); any other report gets its own name, so a local
+    report in runs/ never overwrites the published chart or another report's.
+    """
+    name = "success_by_type.png" if out_md.stem == "results" else f"{out_md.stem}_success_by_type.png"
+    return out_md.parent / name
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point; see the module docstring for the flags."""
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -417,10 +429,12 @@ def main(argv: list[str] | None = None) -> None:
                    help="One runs file, or several (one per model) for a cross-model page.")
     p.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
     p.add_argument("--out", type=Path, default=PROJECT_ROOT / "docs" / "results.md")
-    p.add_argument("--png", type=Path, default=PROJECT_ROOT / "docs" / "success_by_type.png")
+    p.add_argument("--png", type=Path, default=None,
+                   help="Chart path; defaults to a file next to --out (see default_png).")
     p.add_argument("--judge", type=Path, default=None,
                    help="Verdicts from eval.judge; adds the LLM judge rows (off by default).")
     args = p.parse_args(argv)
+    args.png = args.png or default_png(args.out)
     if len(args.runs) > 1:
         if args.judge:
             p.error("--judge holds one runs file's verdicts: pass a single --runs file")

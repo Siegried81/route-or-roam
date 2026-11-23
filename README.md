@@ -17,7 +17,7 @@ the difference:
 
 Both are LangGraph graphs over the same tool registry, fenced prompts, budget,
 verifier and LLM client, so the only variable is the control flow. Retrieval,
-the answer prompt and verification come from [grounded-rag](../grounded-rag),
+the answer prompt and verification come from [grounded-rag](https://github.com/Siegried81/grounded-rag),
 imported in place, never copied.
 
 ## The two graphs
@@ -49,58 +49,89 @@ flowchart LR
 
 ## Results
 
-40 questions × 2 systems × 1 run, `openai/gpt-oss-120b` on Groq, LLM cache off
-(`RR_LLM_CACHE=0`, every answer generated for this run), 8 November 2026, run
-`r122e` ([full report](docs/results.md)), with grounded-rag at e9535b2. Rates
-carry a 95% Wilson interval and the two systems are compared with an exact
-McNemar test on paired answers (`eval/stats.py`); with one repeat there is no
-run-to-run spread to report.
+40 questions × 2 systems × 3 repeats, `openai/gpt-oss-120b` on Groq, LLM cache
+off (`RR_LLM_CACHE=0`, every answer generated for this run). Two runs, with the
+same code:
 
-| type (n) | workflow | agent |
-|---|---|---|
-| single_hop (10) | 9/10 | 9/10 |
-| multi_hop (10) | 9/10 | 9/10 |
-| numeric (8) | 6/8 | 5/8 |
-| cross_corpus (6) | 1/6 | 3/6 |
-| unanswerable (3) | 3/3 | 2/3 |
-| injection (3) | 2/3 | 2/3 |
-| **overall** | **30/40 (75%)** | **30/40 (75%)** |
-| 95% Wilson interval | 60–86% | 60–86% |
-| avg LLM calls · tokens in/out | 2.60 · 4094/1319 | 3.52 · 7829/687 |
-| latency p50 / p95 (s) | 5.1 / 13.3 | 7.0 / 29.0 |
-| injection followed · budget hit | 0% · 0% | 0% · 10% |
+- `r125e` (16 to 19 November 2026), grounded-rag at 80ef892
+  ([report](docs/results.md)).
+- `r126e` (control, 20 to 22 November), grounded-rag at e9535b2, the retrieval
+  of the earlier run `r122e` ([report](runs/r126e.md)).
 
-Paired on the 40 questions: only the workflow passed 2 (nu03, sh10), only the
-agent passed 2 (cc03, cc06), both 28, neither 8; exact McNemar p = 1.000.
+Each run ran on one cloud machine, so every search used the same embeddings.
+Each cell counts passes over the three repeats. The two systems are compared
+with an exact McNemar test (`eval/stats.py`) on paired answers, where a
+question counts as passed when it passed in at least 2 of its 3 repeats
+(computed in `eval/report.py`).
 
-**Takeaway:** the two systems are level, and closer than before: both pass the
-same 28 questions. The agent does better on cross-corpus questions, where it
-searches again; the workflow is better at saying "not in the documents" (3/3
-against 2/3). The agent pays for its flexibility: **1.9× the input tokens,
-1.4× the median latency, and a budget hit on 4 of 40 questions** (on three of
-them it had already answered and ran out during the verification retry, so
-its checked first answer was kept). No answer was lost to the provider this
-time. Four discordant pairs out of 40 cannot separate the two systems
-(p = 1.000), so no winner is claimed. See
-[what the numbers don't say](docs/technical_deep_dive.md#10-what-the-numbers-do-and-dont-say).
+| type (n per repeat) | workflow r125e | agent r125e | workflow r126e | agent r126e |
+|---|---|---|---|---|
+| single_hop (10) | 23/30 | 27/30 | 24/30 | 27/30 |
+| multi_hop (10) | 22/30 | 25/30 | 22/30 | 27/30 |
+| numeric (8) | 21/24 | 21/24 | 21/24 | 19/24 |
+| cross_corpus (6) | 4/18 | 10/18 | 6/18 | 8/18 |
+| unanswerable (3) | 9/9 | 9/9 | 9/9 | 8/9 |
+| injection (3) | 6/9 | 7/9 | 6/9 | 6/9 |
+| **overall** | **85/120 (70.8%)** | **99/120 (82.5%)** | **88/120 (73.3%)** | **95/120 (79.2%)** |
+| per repeat | 28, 28, 29 | 31, 34, 34 | 31, 30, 27 | 33, 32, 30 |
+| passed in 2 of 3 repeats | 29/40 | 33/40 | 30/40 | 32/40 |
+| 95% Wilson interval, on those 40 | 57–84% | 68–91% | 60–86% | 65–90% |
+| avg LLM calls · tokens in/out | 2.38 · 3585/1355 | 3.44 · 7674/683 | 2.38 · 3436/1287 | 3.39 · 7528/691 |
+| latency p50 / p95 (s) | 4.7 / 9.2 | 5.1 / 28.7 | 3.9 / 13.5 | 4.6 / 25.4 |
+| injection followed · budget hit | 0% · 0% | 0% · 7% | 0% · 0% | 0% · 10% |
 
-What both still miss: cross-corpus questions (cc02, cc04, cc05) and the AI Act
-dates of Article 113 (mh08, in03), a single short chunk that rarely ranks for
-"when does X apply". None of the failures comes from a wrong label.
+Paired on the 40 questions. `r125e`: only the workflow passed 0, only the agent
+4 (sh09, mh07, cc04, cc06), both 29, neither 7; exact McNemar p = 0.125.
+`r126e`: only the workflow 1 (nu01), only the agent 3 (sh09, mh02, cc06), both
+29, neither 7; p = 0.625.
 
-**The 14 October run (`r120e`)**, before the 6 November changes, gave workflow
-30/40 (after a relabel) and agent 29/40. A first run on 8 November (`r121e`)
-showed two regressions from those changes, both fixed before `r122e`: the
-workflow's plan had dropped to one search on 26 questions (27/40, 8 false
-refusals), and the agent's budget guard let 8 runs stop without an answer
-(`docs/decisions.md`, 2026-11-08).
+**Takeaway:** the agent passes more questions than the workflow in both runs
+(99 against 85 records, then 95 against 88), and neither gap is significant. In
+`r125e` it passed 4 questions the workflow missed and never the reverse, but
+p = 0.125 is the smallest p that 4 discordant pairs can give, so that run
+couldn't have shown a difference at 5%. It needs more questions. Cross-corpus
+questions, where the agent searches again, are part of the gap, not most of
+it: 6 of the agent's 14 extra passes in `r125e` (10/18 against 4/18), 2 of 7 in
+`r126e` (8/18 against 6/18). The agent pays with 2.1× the input tokens (2.2× in
+`r126e`). It stopped on the token-budget message in 8 of its 120 runs (12 in
+`r126e`), and 23 runs (28) ended above the 12,000-token cap (12,008 to 17,294
+tokens in `r125e`), since the budget is checked before each call. Median
+latency is close, because free-tier rate-limit waits dominate it. See [what the
+numbers don't say](docs/technical_deep_dive.md#10-what-the-numbers-do-and-dont-say).
 
-**Earlier runs.** On a 17-question set labelled against grounded-rag's former
-four-file AI Act primer, the agent first scored 9/17 against the workflow's
-15/17: 7 of its 8 failures were Groq rejecting a `k=10` tool call that the
-published schema capped at 8. Moving the cap into code took it to 15/17. Those
-runs (`s120b`, `s120c`) are analysed in the deep dive §9; they are not
-comparable with the table above (different question set, older scorer).
+**Why the workflow refuses.** In `r125e` it refused 15 times on questions that
+had an answer (4, 5 and 6 per repeat). Retrieval is deterministic, so replaying
+the recorded searches shows what the model had in front of it: in 14 of the 15,
+a source the answer needed never came back. Most are the dates of Article 113,
+which don't rank for queries like "Article 50 effective date" (sh09, cc06,
+cc02, mh07). For nu05, the DMA fine limit is in Apple's 10-K, but the workflow
+looked for it in the AI Act. So the refusal is honest and the search is what
+failed. With the older retrieval (`r126e`) it still refuses 15 answerable
+questions, on a different set, 12 of them with no gold source retrieved.
+
+**Unanswerable questions.** Both systems answered "not in the documents"
+correctly on all 9 runs in `r125e`. In `r126e` the workflow still does (9/9),
+and the agent answers sh10 once instead of refusing (8/9).
+
+**Questions nobody passes.** Passed in none of the 6 runs (2 systems × 3
+repeats): 4 questions in `r125e` (mh08, nu05, cc02, un03) and 7 in `r126e`, the
+same 4 plus cc03, cc05 and in03. mh08 is Article 113 again, un03 a French
+question.
+
+**Retrieval or chance?** `r122e` (8 November, one repeat, grounded-rag
+e9535b2) gave 30/40 to each system. `r125e` differs from it on 8 question ×
+system pairs at the majority, and two things changed in between: grounded-rag's
+hybrid retrieval (43cde89) and the draw, since `r122e` was a single repeat.
+`r126e` is `r125e`'s code on e9535b2 (`rag/answer.py` and `rag/verify.py` are
+identical at both commits, only retrieval differs), so it separates the two. On
+those 8 pairs it lands with `r125e` 6 times and with `r122e` 2 times (workflow
+mh07, agent nu01). Chance explains most of the move, and 2 pairs can't size a
+retrieval effect. Record by record, the verdicts agree on 105 of 120 for the
+workflow and 110 of 120 for the agent, and the totals move by 3 and 4 passes,
+inside the spread across repeats. 
+**Earlier runs** (`r120e` to `r124e`, `s120*`) ran on older code, labels or
+scorers and are not comparable with the table; they are described in the
+[deep dive](docs/technical_deep_dive.md#9-results) and `docs/decisions.md`.
 
 ## Safety controls
 
@@ -128,8 +159,11 @@ comparable with the table above (different question set, older scorer).
 - **Loop guard** (`rr/guard.py`): an exact repeat call is blocked; a second
   repeat ends the run.
 - **Cite or refuse + verify**: grounded-rag's verifier on every answer, one
-  retry on failure. A refusal is grounded-rag's exact refusal sentence (in any
-  of its languages) and cites nothing.
+  retry on failure, with a message that names what failed. A refusal is
+  grounded-rag's exact refusal sentence (in any of its languages) and cites
+  nothing. Its figure check fails any number the cited source doesn't carry;
+  both systems also accept a calculator result (rounded as written) and a
+  number the question itself gives, since a correct total is in no source.
 - **Free-tier resilience** (`rr/llm.py`): 5-key rotation, waits for the
   announced rate-limit window, retries four known gpt-oss 400s once, caches
   replies on disk (`RR_LLM_CACHE`); a malformed or empty reply is an error,
@@ -172,112 +206,53 @@ python -m eval.report --runs runs/m1--groq-openai-gpt-oss-20b.jsonl runs/m1--gro
 python -m eval.judge --runs runs/r1.jsonl --estimate            # opt-in LLM judge: one call per record
 python -m eval.judge --runs runs/r1.jsonl                       # -> runs/r1.judge.jsonl (resumable)
 python -m eval.report --runs runs/r1.jsonl --judge runs/r1.judge.jsonl   # adds the judge rows
-python -m pytest -q                                             # 276 tests, offline
+python -m pytest -q                                             # 291 tests, offline
 ```
 
 `npm` comes from nvm, which only loads in an interactive shell: `which npm`
 should point under `~/.nvm`. `web/dist` is not committed, so `/` on port 8001
 is a 404 until `cd web && npm run build`; the `/api/*` routes work regardless.
 
-### CI
+### CI and deployment
 
-`.github/workflows/ci.yml` runs on every push and pull request: the offline
-tests with grounded-rag checked out next to the repo, the React build, and a
-Docker build of the image below followed by a smoke test (indexes built at
-start with the fake embedder, then `/api/health` must answer). Dependabot
-(`.github/dependabot.yml`) opens one grouped PR a month per ecosystem for pip,
-npm, Actions and the base images, and one PR per major release.
-`tests/test_deploy_config.py` keeps `Dockerfile`, `docker-compose.yml`,
-`render.yaml` and the workflow in step with the code: health route, port,
-corpora, `RR_INGEST_ON_START` on Render, no secret value committed. The tests
-job checks out grounded-rag at a fixed commit (`GROUNDED_RAG_REF` in the
-workflow), the one the questions are labelled against, and the `Dockerfile`
-builds the same commit (a test checks they agree); bump both after
-`python -m eval.locate_gold` reports nothing missing at the new commit.
-Actions are pinned to commit SHAs.
-
-Python versions: `requirements.txt` holds the supported floors,
-`requirements.lock` the exact versions the image ships (grounded-rag's
-requirements and this project's, resolved together for Python 3.12 on Linux),
-and `requirements-dev.txt` the test tools. After a floor changes (Dependabot
-raises them), regenerate the lock with the command at its top;
-`tests/test_deploy_config.py` fails until the lock satisfies every floor.
-
-### Deploying
-
-grounded-rag is imported in place (its `rag` package, `config`, `data/` and
-`index/`), so a deployment ships a checkout of it, not a pip package. The
-`Dockerfile` clones it at build time at a pinned commit (`--build-arg
-GROUNDED_RAG_REF=<sha>` to override), builds the UI in a Node stage, and starts
-uvicorn on `$PORT`.
-
-`/api/ask` spends Groq tokens on every call, so a public deploy needs a guard.
-Both are off by default: `RR_RATE_LIMIT_PER_MINUTE` caps asks per client IP
-over a sliding minute (`render.yaml` sets 6), and `RR_API_KEY` makes callers
-send `X-API-Key` (for an API-only deploy: the bundled UI does not send one).
-
-```bash
-docker compose --profile local-llm up -d ollama                      # bundled embedder
-docker compose --profile local-llm exec ollama ollama pull nomic-embed-text
-docker compose --profile tools --profile local-llm run --rm ingest   # both indexes, once, into the rag_index volume
-docker compose up --build                                            # API + UI on :8001
-```
-
-`render.yaml` is a Render blueprint for the same image: no Ollama there, so it
-sets `EMBED_PROVIDER=hosted` and `RR_INGEST_ON_START=1`, which builds the
-indexes on every start with the hosted embedder named in the dashboard
-(`HOSTED_EMBED_BASE_URL`, `HOSTED_EMBED_MODEL`, `HOSTED_EMBED_API_KEY`) plus
-`GROQ_API_KEY`; `RR_APPROVE_TOKEN` is generated by Render and typed once into
-the approval dialog. CI builds and smoke-tests this image; the Render deploy itself is not
-exercised, so the first deploy is its test.
-
-**Streamlit Community Cloud** clones only this repository, so the checkout and
-the indexes are made at first import instead: deploy `app.py` and put these in
-the app's *Secrets* (Streamlit exports them as environment variables):
-
-```toml
-RR_FETCH_GROUNDED_RAG = "1"          # download grounded-rag's archive into GROUNDED_RAG_PATH
-GROUNDED_RAG_PATH = ".grounded-rag"  # relative to this repository
-GROUNDED_RAG_REF = "main"            # branch, tag or commit sha
-RR_INGEST_ON_START = "1"             # build a corpus index on first use
-EMBED_PROVIDER = "hosted"            # no Ollama there; any OpenAI-compatible /embeddings endpoint
-HOSTED_EMBED_BASE_URL = "https://openrouter.ai/api/v1"
-HOSTED_EMBED_MODEL = "nvidia/nemotron-3.5-embed-1b:free"
-HOSTED_EMBED_API_KEY = "..."
-GROQ_API_KEY = "..."
-```
-
-The platform has no persistent disk, so both happen again on every cold start,
-and the first question after one waits for the download (a few MB) and the
-embedding of that corpus. `requirements.txt` already carries what grounded-rag's
-retrieval imports; its PDF reader is not needed, the shipped corpora are text.
-
-Each record `eval.run_compare` writes to `runs/*.jsonl` carries the provider,
-model, cache setting and budget it ran with (the published `s120*` records
-predate this and carry none). `--models` (or `RR_EVAL_MODELS`) runs one batch on several
-models, `name` or `provider:name` (`ollama:llama3.2:3b`), each into its own
-`runs/<run_id>--<provider>-<model>.jsonl`; the report given several files
-writes one cross-model table followed by each file's own report. No
-cross-model run has been made yet. `eval/paraphrases.jsonl` holds 4 questions with 2
-rephrasings each (casual, other language; `paraphrase_of` links them), and the
-report then adds a "same verdict for every phrasing" line.
+`.github/workflows/ci.yml` runs the offline tests (grounded-rag checked out at a
+fixed commit), the React build (`npm ci && npm run build`) and a Docker build
+with a smoke test on every push to `main` and every pull request. The image,
+Render, Docker Hub and Streamlit Community Cloud are in
+[docs/deploy.md](docs/deploy.md).
 
 The React UI ([docs](docs/react_ui.md)) runs both systems side by side with
 their traces and shows an approval modal when the agent asks for `save_report`.
+Each record `eval.run_compare` writes carries the provider, model, cache setting
+and budget it ran with; `--models` runs one batch on several models, each into
+its own file (no cross-model run has been made yet).
 
 ## Honest limits
 
-- One run of 40 questions on one model, so there's no run-to-run spread (it
-  shows as n/a). Both systems pass 30/40, and the 95% Wilson interval is 60%
-  to 86% for each.
-- The run can't pick a winner. Only 4 questions split the systems, 2 each way,
-  so the exact McNemar p is 1.0. With 4 discordant pairs the smallest p you
-  can get is 0.125 (all 4 going the same way), so no result could have
-  reached 5%. It needs more questions. There are also only 3 to 10 questions
-  per type, and the design target (40 × 2 × 3, cache off) hasn't been run yet.
-- `r122e` is the first run with the 6 November fixes and the two 8 November
-  regression fixes. Runs before it aren't comparable (`docs/decisions.md`,
-  2026-11-08).
+- Three repeats of 40 questions on one model. Across repeats the workflow
+  passes 28 to 29 (`r125e`) and 27 to 31 (`r126e`), the agent 31 to 34 and 30
+  to 33. `docs/results.md` and `runs/r126e.md` give a Wilson interval over the
+  120 records of each system (`r125e`: 62-78% and 75-88%; `r126e`: 65-80% and
+  71-85%); those are 40 questions asked three times, not 120 independent
+  draws, so that interval is too narrow. On the 40 questions (passed in 2 of 3
+  repeats) it is 57-84% and 68-91% for `r125e`, 60-86% and 65-90% for `r126e`.
+- The runs can't pick a winner yet. Only 4 questions split the systems in each
+  run (4 for the agent in `r125e`, p = 0.125, the smallest p 4 discordant pairs
+  can give; 1 for the workflow and 3 for the agent in `r126e`, p = 0.625). It
+  needs more questions. There are also only 3 to 10 questions per type.
+- Most wrong refusals are retrieval misses, not reasoning errors: one short
+  chunk (Article 113) holds the AI Act's application dates and rarely ranks.
+  Both systems share grounded-rag's retrieval, so this caps both. With the
+  older retrieval (`r126e` on e9535b2) the workflow still refuses 15 answerable
+  questions, on a different set, 12 of them with no gold source retrieved.
+- `r125e` ran on grounded-rag 80ef892, `r126e` on e9535b2, `r123e` on 2fad55f;
+  `r122e` and earlier ran on e9535b2 or older. CI and the image pin 2fad55f;
+  2fad55f to 80ef892 changes grounded-rag's NLI loader, its API, UIs and docs,
+  and neither its retrieval nor its verifier, so `r125e` is what the pinned
+  code gives. Runs before `r125e` also predate the 16 November figure-check
+  fix, and runs before `r122e` the 6 November fixes (`docs/decisions.md`), so
+  their numbers aren't directly comparable.
+- The raw records and reports of `r125e` and `r126e` are in `runs/`.
 - Latency mostly measures free-tier rate-limit waits, not the designs.
 - Scoring is string and number matching; a correct paraphrase can fail. The
   opt-in LLM judge (`eval/judge.py`) flags those cases in extra report rows;
