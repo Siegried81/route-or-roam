@@ -26,6 +26,7 @@ import collections
 import json
 from pathlib import Path
 
+from eval.run_compare import QUESTIONS_PATH
 from eval.score import score_record
 from eval.stats import mcnemar_exact, wilson
 
@@ -137,7 +138,8 @@ def report(paths: list[str], questions: dict) -> str:
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="Compare two or three runs question by question.")
     ap.add_argument("runs", nargs="+", help="two or three runs files (A, B, optional control C)")
-    ap.add_argument("--questions", default="eval/questions.jsonl")
+    ap.add_argument("--questions", type=Path, default=QUESTIONS_PATH,
+                    help="Questions file (default: $RR_QUESTIONS, else eval/questions.jsonl).")
     args = ap.parse_args(argv)
     if not 2 <= len(args.runs) <= 3:
         ap.error("give two or three runs files")

@@ -24,6 +24,7 @@ source is missing, so CI can run it.
 Usage:
     python -m eval.locate_gold
     python -m eval.locate_gold --corpus ../grounded-rag/data
+    python -m eval.locate_gold --questions eval/questions_v2.jsonl
 """
 
 from __future__ import annotations
@@ -32,10 +33,10 @@ import argparse
 import json
 from pathlib import Path
 
+from eval.run_compare import QUESTIONS_PATH
 from eval.score import fact_matched
-from rr.settings import GROUNDED_RAG_PATH, ROOT
+from rr.settings import GROUNDED_RAG_PATH
 
-QUESTIONS = ROOT / "eval" / "questions.jsonl"
 CORPORA = ("filings_sections", "ai_act_sections")
 
 
@@ -60,13 +61,15 @@ def locate(question: dict, corpus: dict[str, str]) -> dict:
             "numeric": [f for f in question.get("key_facts") or [] if not isinstance(f, str)]}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--corpus", type=Path, default=GROUNDED_RAG_PATH / "data")
-    args = parser.parse_args()
+    parser.add_argument("--questions", type=Path, default=QUESTIONS_PATH,
+                        help="Questions file (default: $RR_QUESTIONS, else eval/questions.jsonl).")
+    args = parser.parse_args(argv)
 
     corpus = load_corpus(args.corpus)
-    questions = [json.loads(line) for line in QUESTIONS.read_text(encoding="utf-8").splitlines()
+    questions = [json.loads(line) for line in args.questions.read_text(encoding="utf-8").splitlines()
                  if line.strip()]
     stale = [r for r in (locate(q, corpus) for q in questions) if r["missing"]]
     print(f"{len(corpus)} corpus files, {len(questions)} questions, {len(stale)} with a missing gold source")
