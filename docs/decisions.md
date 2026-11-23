@@ -333,23 +333,32 @@ behind them is old.
   and a fact of 1000 or more may be read as units, thousands or millions. A
   number is always also tried as written, because a fact's unit is not known.
   The LLM judge's rubric says the same (new `RUBRIC_ID`).
+- **`min_decimals`:** a question may carry this optional integer, the precision
+  its text asks for. The number must then also show at least that many
+  decimals, at the fact's own scale; a fact never has to show more decimals than
+  its label has (an integer fact needs none). Set to 1 on `nu01`, `nu02`, `nu03`
+  and `nu07`, the four questions that say "one decimal". The precision rule alone
+  accepted "6 %" for the 6.43% of `nu01`, which does not answer "one decimal".
+- **Label corrected, `nu03`:** 3.825 becomes 3.846. Source `05_mdna.txt`,
+  "Greater China 64,377 (4) % 66,952": 1 - 64,377 / 66,952 = 0.038460 = 3.846%.
+  3.825 was a midpoint chosen so that the old ±1% band accepted 3.8 and 3.85;
+  with the precision rule the true value does it directly (3.8 and 3.85 pass,
+  3.9 and 3.84 fail). Nothing else in `eval/questions.jsonl` changed.
 - **Why:** a ±1% band is the wrong test of "same number". It accepted 15 413 for
   15 421 (shown before the fix) and rejected a rounding to the digits the answer
   claims. Reading the answer at its own precision accepts honest rounding and
-  rejects a wrong digit.
-- **Numbers:** re-scored offline from the stored answers (no LLM call), 3
-  records go from fail to pass and none from pass to fail, all "6 %" for the 6.43%
-  of `nu01`: `r122e` agent 30/40 to 31/40, `r126e` agent 95/120 to 97/120 (2
-  repeats), `r125e` unchanged. The question asks for one decimal; "6 %" is
-  accepted by the rule, not by the question's wording. The majority over 40: `r122e`
-  agent 30 to 31, `r126e` agent 32 to 33; `r126e` McNemar p from 0.625 to 0.25
-  (0 against 3 discordant questions). Cost per correct answer: `r126e` agent
-  $0.00195 to $0.00191, `r122e` agent $0.00212 to $0.00205. Earlier entries
-  quote the figures of their day.
-- **Limit:** a one-digit answer is accepted over a wide range ("6 %" for 6.4 and
-  also for 5.6). The label of `nu03` is 3.825 for a true 3.846%: "3.8" passes,
-  "3.85" fails, which the precision rule would accept for the true value. The
-  question file is left as it is.
+  rejects a wrong digit; `min_decimals` keeps a question's own demand.
+- **Numbers:** re-scored offline from the stored answers (no LLM call) with
+  three rules: ±1%, precision alone, precision plus `min_decimals`. Precision
+  alone moved 3 records from fail to pass (`nu01` answered "6 %": `r122e` agent,
+  `r126e` agent repeats 1 and 2) and none the other way; with `min_decimals`
+  those 3 fail again, so the final rule gives the same verdict as ±1% on all 560
+  records. Every total, majority, McNemar p, count by type and cost per correct
+  answer is unchanged. Earlier entries quote the figures of their day.
+- **Limit:** a one-digit answer is accepted over a wide range when a question sets
+  no `min_decimals`. The labels 6.4, 9.7 and 26.2 are rounded values (true 6.43,
+  9.67, 26.23), so a more precise correct answer such as "6.43" fails against the
+  label 6.4; no stored answer does it.
 
 ## 2026-11-23: A refusal that cites its sources is still a refusal
 
@@ -375,5 +384,5 @@ behind them is old.
 - **Limit:** "I don't know. The documents say revenue was 416 billion [S1]."
   counts as a refusal, as decided: a strong refusal followed by a description of
   the sources. On a real answer set it would be worth reading these by eye.
-- **Tests:** 307 to 359 (number rule, refusal rule in five languages, the
-  hesitation-then-claim guard, `cited_refusal`).
+- **Tests:** 307 to 375 (number rule, `min_decimals`, refusal rule in five
+  languages, the hesitation-then-claim guard, `cited_refusal`).

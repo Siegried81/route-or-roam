@@ -88,7 +88,7 @@ python -m uvicorn api.main:app --port 8001      # React UI backend
 cd web && npm install && npm run dev            # http://localhost:5181
 python -m streamlit run app.py                  # Streamlit alternative, port 8501
 
-python -m pytest -q                             # 307 tests, offline
+python -m pytest -q                             # 375 tests, offline
 ```
 
 An eval run, its resume, its check and its report: [docs/running_an_eval.md](docs/running_an_eval.md).
