@@ -35,3 +35,9 @@ def test_duplicate_fails_even_at_the_right_count(tmp_path):
 def test_other_provider_fails(tmp_path):
     rows = _rows(3) + _rows(1, "ollama")[:0] + [{"system": "agent", "qid": "z", "repeat": 0, "provider": "ollama"}]
     assert not check_run.check(_write(tmp_path / "a.jsonl", rows), 4)[0]
+
+
+def test_expected_provider_can_be_changed(tmp_path):
+    path = _write(tmp_path / "a.jsonl", _rows(2, "ollama"))
+    assert check_run.main([str(path), "--expected", "2"]) == 1
+    assert check_run.main([str(path), "--expected", "2", "--provider", "ollama"]) == 0

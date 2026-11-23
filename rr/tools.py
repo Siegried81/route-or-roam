@@ -39,7 +39,7 @@ class SearchArgs(_Args):
     corpus: Corpus = Field(description="Which document collection to search.")
     # No `le` bound in the schema on purpose: Groq validates tool calls against
     # the published JSON schema and rejects the whole call when gpt-oss asks for
-    # k=10 against a maximum of 8. That rejection caused 7 of 17 agent failures
+    # k=10 against a maximum of 8. That rejection caused 7 of the agent's 8 failures
     # in the first measured run. The cap is enforced in code instead
     # (`capped_k`), so an over-eager k still searches, with at most
     # settings.MAX_SEARCH_K passages (8 unless RR_MAX_SEARCH_K says otherwise).

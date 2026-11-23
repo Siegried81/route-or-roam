@@ -189,3 +189,37 @@ def test_main_writes_provenance_into_records(tmp_path, monkeypatch, groq):
     run_compare.main(["--run-id", "p", "--repeats", "1", "--questions", str(qf), "--runs-dir", str(tmp_path)])
     rec = json.loads((tmp_path / "p.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert {"code_sha", "code_dirty", "grounded_rag_sha", "questions_sha256"} <= set(rec)
+
+
+def test_provenance_of_grounded_rag_dirty_flag(tmp_path, monkeypatch):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)  # noqa: E731
+    git("init")
+    (repo / "f.txt").write_text("x")
+    git("add", ".")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "c")
+    monkeypatch.setattr(settings, "ROOT", repo)
+    monkeypatch.setattr(settings, "GROUNDED_RAG_PATH", repo)
+    q = tmp_path / "q.jsonl"
+    q.write_text("{}\n")
+    assert run_compare.provenance(q)["grounded_rag_dirty"] is False
+    (repo / "f.txt").write_text("edited")
+    assert run_compare.provenance(q)["grounded_rag_dirty"] is True
+
+
+def test_provenance_does_not_borrow_the_enclosing_repo_commit(tmp_path, monkeypatch):
+    """A grounded-rag folder that is not itself a checkout (an unpacked archive inside this repo) is unknown."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / ".grounded-rag").mkdir(parents=True)
+    subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+    monkeypatch.setattr(settings, "ROOT", repo)
+    monkeypatch.setattr(settings, "GROUNDED_RAG_PATH", repo / ".grounded-rag")
+    q = tmp_path / "q.jsonl"
+    q.write_text("{}\n")
+    meta = run_compare.provenance(q)
+    assert meta["grounded_rag_sha"] == "unknown" and meta["grounded_rag_dirty"] is None

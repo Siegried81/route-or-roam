@@ -161,23 +161,41 @@ def _git(repo: Path, *args: str) -> str | None:
     return out.stdout.strip() if out.returncode == 0 else None
 
 
+def _own_git(repo: Path, *args: str) -> str | None:
+    """Like ``_git``, but None unless ``repo`` is itself the root of a git checkout.
+
+    ``git -C`` walks up the folder tree, so a plain folder inside another
+    repository (a grounded-rag archive unpacked under route-or-roam by
+    RR_FETCH_GROUNDED_RAG, or a ``git archive`` copy) would report the
+    enclosing repository's commit as its own.
+    """
+    top = _git(repo, "rev-parse", "--show-toplevel")
+    if top is None or Path(top).resolve() != Path(repo).resolve():
+        return None
+    return _git(repo, *args)
+
+
 def provenance(questions_path: Path = QUESTIONS_PATH) -> dict:
     """Which code and which questions produced a run, stored with every record.
 
     ``code_sha`` is route-or-roam's HEAD and ``code_dirty`` says whether files
     other than the outputs (``runs/``, ``reports/``, which a run itself writes)
     differ from it; ``grounded_rag_sha`` is the HEAD of the checkout at
-    ``GROUNDED_RAG_PATH`` ("unknown" when that is not a git checkout, as in the
-    Docker image); ``questions_sha256`` is the hash of the questions file.
+    ``GROUNDED_RAG_PATH`` ("unknown" when that folder is not itself a git
+    checkout, as in the Docker image) and ``grounded_rag_dirty`` whether its
+    tracked or untracked files differ from that commit (None when unknown);
+    ``questions_sha256`` is the hash of the questions file.
     Without it a runs file cannot say what it measured.
     """
     from rr import settings
 
     root = settings.ROOT
     dirty = _git(root, "status", "--porcelain", "--", ".", ":!runs", ":!reports")
+    rag_dirty = _own_git(settings.GROUNDED_RAG_PATH, "status", "--porcelain")
     return {"code_sha": _git(root, "rev-parse", "HEAD") or "unknown",
             "code_dirty": bool(dirty) if dirty is not None else None,
-            "grounded_rag_sha": _git(settings.GROUNDED_RAG_PATH, "rev-parse", "HEAD") or "unknown",
+            "grounded_rag_sha": _own_git(settings.GROUNDED_RAG_PATH, "rev-parse", "HEAD") or "unknown",
+            "grounded_rag_dirty": bool(rag_dirty) if rag_dirty is not None else None,
             "questions_sha256": hashlib.sha256(Path(questions_path).read_bytes()).hexdigest()}
 
 
