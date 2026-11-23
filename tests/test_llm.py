@@ -295,3 +295,26 @@ def test_an_empty_reply_is_returned_but_never_cached(monkeypatch, tmp_path):
     assert ChatLLM("groq").chat(messages).content == ""
     ChatLLM("groq").chat(messages)
     assert len(sent) == 2  # asked again, not served a cached empty reply
+
+
+def test_all_keys_limited_names_each_keys_limit(monkeypatch):
+    """The error keeps Groq's reason per key (limit kind, used/limit, org), never the key itself."""
+    monkeypatch.setattr(settings, "GROQ_API_KEYS", ["secret-a", "secret-b"])
+
+    class _Limited(_Resp):
+        def __init__(self, text):
+            super().__init__(429)
+            self.headers, self.text = {}, text
+
+    tpd = ('{"error":{"message":"Rate limit reached for model `openai/gpt-oss-120b` in organization '
+           '`org_01abcdefghij` service tier `on_demand` on tokens per day (TPD): Limit 100000, '
+           'Used 98000, Requested 500. Please try again in 2m33s."}}')
+    replies = iter([_Limited(tpd), _Limited("upstream says no")])
+    monkeypatch.setattr(requests, "post", lambda *a, **k: next(replies))
+    with pytest.raises(TransientLLMError) as caught:
+        ChatLLM("groq").chat([])
+    msg = str(caught.value)
+    assert msg.startswith("rate-limited on every configured key (429)")
+    assert "key 1: TPD used 98000/100000, requested 500, org_01abcd" in msg
+    assert "key 2: upstream says no" in msg
+    assert "secret" not in msg

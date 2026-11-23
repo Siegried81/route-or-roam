@@ -1,30 +1,27 @@
 # Route or Roam: technical deep dive
 
-This document explains how the two systems are built, how they are kept
-comparable, how they were evaluated and what the numbers can and cannot
-support. The short version lives in the [README](../README.md); the React
-front end is documented in [react_ui.md](react_ui.md).
+How the two systems are built, how they are kept comparable, how they are
+measured and what the numbers can support. The short version is the
+[README](../README.md); the React front end is in [react_ui.md](react_ui.md),
+deployment in [deploy.md](deploy.md), dated decisions in
+[decisions.md](decisions.md).
 
 ## 1. Design goals
 
-The question the project answers is narrow on purpose: **with the same
-questions, the same tools and the same model, when does an agent beat a fixed
-workflow, and what does it cost?** Everything follows from wanting that answer
-to be fair and reproducible:
+The question is narrow on purpose: **with the same questions, tools and
+model, when does an agent beat a fixed workflow, and what does it cost?**
 
 1. **Only the control flow differs.** Both systems share the tool registry,
-   prompts, fence, budget, verifier, LLM client and result contract. If one
-   system needed a special case in a shared module, the comparison would stop
-   being like for like.
+   prompts, fence, budget, verifier, LLM client and result contract. A special
+   case in a shared module would stop the comparison being like for like.
 2. **Code owns the boundaries.** The model may propose anything; code decides
-   what runs. Tool names are allowlisted, arguments validated, side effects
-   gated by a human, steps and tokens capped.
+   what runs: allowlisted tools, validated arguments, a human gate on side
+   effects, capped steps and tokens.
 3. **Every run produces a result.** A model failure, a rate limit or a bad tool
    call ends in a record with an `error` field, never in an exception that
    aborts an evaluation.
-4. **The measurement is defined once.** Success is defined in `eval/score.py`
-   and nowhere else; records are stored raw and scored at report time, so a
-   scoring fix never requires paying for a re-run.
+4. **The measurement is defined once** in `eval/score.py`. Records are stored
+   raw and scored at report time, so a scoring fix never needs a re-run.
 5. **Reuse, don't copy.** Retrieval, the answer prompt, citation normalisation
    and verification come from grounded-rag, imported in place.
 
@@ -46,105 +43,70 @@ cli.py / app.py (Streamlit) / api + web (React)        eval/run_compare.py
 
 ### 2.1 Why both systems are LangGraph graphs
 
-A workflow does not need a graph library; a few function calls would do. It is
-a graph anyway because the comparison would otherwise mix two variables: the
-control strategy *and* the runtime. With both systems on LangGraph, state is
-the same `RunState` TypedDict, nodes call the same `llm_step` and `run_tool`,
-and the trace and checkpoint machinery are identical. The only difference is
-who chooses the next edge: conditional edges written in Python (System A) or
-the model's tool calls (System B).
+A workflow does not need a graph library. It is one anyway so the comparison
+mixes only one variable: both share `RunState`, `llm_step`, `run_tool` and the
+trace and checkpoint machinery, and differ only in who chooses the next edge,
+Python (A) or the model's tool calls (B). The graphs are drawn in the README.
 
 ### 2.2 System A: fixed workflow (`rr/workflow.py`)
 
-```mermaid
-flowchart LR
-    S([START]) --> trigger --> plan --> search
-    search -->|needs_math| calculate --> answer
-    search -->|no math| answer
-    answer --> verify
-    verify -->|failed, first attempt| answer
-    verify -->|ok, or second attempt| E([END])
-    plan -. budget / error .-> stop --> E
-    answer -. budget / error .-> stop
-```
-
 - **plan**: one JSON-mode call returning a `Plan`: 2 to 4 searches, each a
-  query with the one corpus it goes to, and `needs_math`. Queries are written
-  in English even for a French question (both corpora are English; French
-  queries missed the article sh08, sh09 and mh08 needed). The model is
-  validated with `extra="forbid"`; an invalid plan is not repaired but replaced
-  by a safe fallback (the question itself, against each corpus, no math),
-  recorded as `fallback: true`. Before 6 November 2026 the plan listed corpora
-  and queries separately and every query went to every corpus, which spent
-  half of a cross-corpus question's searches on the wrong corpus.
-- **search**: code runs each planned search with `k=4`
-  (`RR_WORKFLOW_SEARCH_K`), through the shared `run_tool`. The agent picks its
-  own `k` (it chose 8 on 68 of its 87 searches on 14 October). The workflow
-  stays at 4 because each of its calls carries every passage: 4 searches at
-  k=8 would overrun the 12k-token budget and Groq's 8k-token free-tier request
-  limit. This is a real difference in retrieval depth, paid for by the agent
-  in tokens; the knob lets a run test the workflow at k=8.
-- **calculate**: only when the plan says so and passages exist. The model
-  writes 1 to 3 expressions over the fenced sources in one call (a percentage
-  change needs the difference and the ratio; with one expression the model
-  rounded the ratio by hand, wrongly, on nu01 and nu03), and the safe
-  calculator evaluates each. `days_between("YYYY-MM-DD", "YYYY-MM-DD")` covers
-  deadline questions (cc06).
-- **answer**: grounded answer from the fenced passages (plus the exact
-  calculator result). No passages means the refusal sentence, without a call.
-- **verify**: grounded-rag's verifier; a failure earns exactly one retry with
-  feedback.
+  query with the one corpus it goes to, and `needs_math`. Queries are written in
+  English even for a French question (both corpora are English). An invalid
+  plan is not repaired but replaced by a safe fallback (the question itself,
+  against each corpus, no math), recorded as `fallback: true`.
+- **search**: code runs each planned search with `k=4` (`RR_WORKFLOW_SEARCH_K`)
+  through the shared `run_tool`, in parallel and registered in plan order. The
+  agent picks its own `k`: it asked for 10, capped to 8, on 209 of 238 searches
+  in `r125e`. The workflow stays at 4 because 4 searches at k=8 would overrun the
+  12k-token budget and Groq's 8k request limit. This is a real difference in
+  retrieval depth, paid for by the agent in tokens.
+- **calculate**: only when the plan says so and passages exist. One call
+  writes 1 to 3 expressions (a percentage change needs the difference and the
+  ratio) and the safe calculator evaluates each; `days_between("YYYY-MM-DD",
+  "YYYY-MM-DD")` covers deadline questions.
+- **answer**: grounded answer from the fenced passages plus the exact
+  calculator result. No passages means the refusal sentence, without a call.
+- **verify**: grounded-rag's verifier (with the figure rule of §2.4); a failure
+  earns exactly one retry with feedback that names what failed.
 
-The workflow therefore makes **at most 4 LLM calls by construction** (plan,
-calculate, answer, retried answer). It cannot adapt to what the searches
-return: if the first plan misses a section, nothing goes back for it.
+At most **4 LLM calls by construction** (plan, calculate, answer, retried
+answer). It cannot adapt to what the searches return.
 
 ### 2.3 System B: ReAct agent (`rr/agent.py`)
 
-```mermaid
-flowchart LR
-    S([START]) --> agent
-    agent -->|tool calls| guard
-    agent -->|final text, budget or error| finalize
-    guard -->|save_report| human_approval["human_approval (interrupt)"]
-    guard -->|allowed / blocked repeat| tools
-    guard -->|second repeat: loop| finalize
-    human_approval --> tools --> agent
-    finalize -->|verify failed, first time| agent
-    finalize --> E([END])
-```
-
-- **agent**: one LLM call with all four tool schemas offered and
-  `tool_choice="auto"`. Tool requests become `pending`; a reply with no tool
-  call is the final answer.
-- **guard**: gives each pending call a verdict (`run`, `approve`, `block`).
-- **human_approval**: pauses on `interrupt()` for calls that need it.
-- **tools**: executes allowed calls and answers every `tool_call_id`
-  (including blocked and rejected ones) so the next model turn stays valid.
-- **finalize**: the same `check_answer` as the workflow, with the same single
-  retry on a failed verification.
-
-The agent can search as often as it likes, in any corpus, with any query, up to
-the shared budget of 8 LLM calls.
+One `agent` node calls the model with all four tool schemas and
+`tool_choice="auto"`; a reply with no tool call is the final answer. `guard`
+gives each pending call a verdict (`run`, `approve`, `block`), `human_approval`
+pauses on `interrupt()`, and `tools` executes allowed calls and answers every
+`tool_call_id` (blocked and rejected ones too) so the next turn stays valid.
+`finalize` runs the same `check_answer` as the workflow, with the same single
+retry. The agent can search as often as it likes, in any corpus, up to the shared
+budget of 8 LLM calls.
 
 ### 2.4 Shared pieces (`rr/common.py`)
 
-- `ANSWER_SYSTEM`: grounded-rag's `SYSTEM_PROMPT` plus three additions both
-  systems need: cite source ids as `[S1]`, the fence rule, and an exact refusal
-  sentence the scorer can detect.
+- `ANSWER_SYSTEM`: grounded-rag's `SYSTEM_PROMPT` plus three additions: cite
+  source ids as `[S1]`, the fence rule, and an exact refusal sentence the scorer
+  can detect.
 - `llm_step`: checks the budget, calls the model through `call_with_backoff`,
-  charges real token counts from the response, and turns a permanent failure
-  into `stop_reason="error"` instead of raising.
+  charges real token counts, and turns a permanent failure into
+  `stop_reason="error"` instead of raising.
 - `check_answer`: forces the refusal sentence when there are no passages,
-  normalises citations, runs grounded-rag's verifier, and extracts the valid
-  citations. An answer is `refused` when it is grounded-rag's exact refusal
-  sentence in any of its languages (English, French, Dutch: a question asked
-  in French is often refused in French) **and nothing else**, curly
-  apostrophes folded to straight ones (`is_refusal`). Any other word is a
-  claim: "Revenue was 416 billion. I couldn't find anything..." asserts a
-  figure, cited or not, so it is scored as an answer. The earlier rule (the English sentence alone, citations
-  ignored) counted some cited answers as refusals; records scored before this
-  rule are not comparable on `refused`.
+  normalises citations, runs grounded-rag's verifier and extracts the valid
+  citations. An answer is `refused` only when it is grounded-rag's exact
+  refusal sentence in any of its languages (English, French, Dutch), and
+  nothing else, curly apostrophes folded (`is_refusal`): "Revenue was 416
+  billion. I couldn't find anything..." asserts a figure, so it is an answer.
+- **The figure rule.** grounded-rag's figure check fails a cited sentence that
+  states a number its source doesn't carry. A correct answer to a numeric
+  question is in no source by definition (89.3 + 15.4 = 104.7), so
+  `check_answer` also accepts the result of a calculation that ran, matched at
+  the precision the answer writes it ("6.4%" for 6.42551; a one-digit figure
+  only when equal), and a number the question gives ("Article 50"). Arithmetic
+  done without the calculator still fails. Rejected figures go into
+  `verify["unsupported_numbers"]` and the retry message names them. Both
+  systems pass `question` and `tool_calls` to it (`tests/test_derived_figures.py`).
 - `to_result`: projects the final state onto the result contract.
 
 ### 2.5 The result contract (`rr/run.py`)
@@ -152,651 +114,344 @@ the shared budget of 8 LLM calls.
 `answer_question(system, question, run_id=, qid=, llm=, injected_passage=,
 approve=)` always returns the same flat dict:
 
-```
-run_id, system, qid, answer, citations [sid], sources_searched [file],
-tool_calls [{name, args, ok, error}], llm_calls, tokens_in, tokens_out,
-latency_s, refused, budget_exhausted, stop_reason, injection_flags,
-hallucinated_tools, error
-```
+The record holds the answer, its citations and searched sources, every tool
+call, LLM calls, tokens, latency, `refused`, `budget_exhausted`, `stop_reason`,
+`injection_flags`, `hallucinated_tools` and `error`.
 
 It never raises for model or tool failures. Each agent call uses a fresh
-`thread_id`, so re-running the same `run_id`/`qid` never resumes an old
-checkpoint by accident. The CLI, Streamlit app, FastAPI service and eval
-harness all go through this contract (the API builds its traces from the same
-graph pieces and still ends in `to_result`).
+`thread_id`, so re-running a `run_id`/`qid` never resumes an old checkpoint.
+The CLI, Streamlit app, FastAPI service and eval harness all go through it.
 
 ### 2.6 Reusing grounded-rag (`rr/grounded.py`)
 
-`rr/grounded.py` is the only module that touches `sys.path`. It imports
-grounded-rag's `config`, `rag.answer`, `rag.retrieve`, `rag.verify` and the
-store and BM25 index from `GROUNDED_RAG_PATH`, loads each corpus's
-`(store, bm25, embedder)` once per process, and re-exports `SYSTEM_PROMPT`,
-`REFUSAL_MESSAGE` and `VERIFY_MIN_GROUNDING` (0.30). Queries are embedded with
-grounded-rag's own embedder, so they land in the same space the index was built
-in. Any retrieval or verifier fix made in grounded-rag applies here without a
-copy to keep in sync. The tests monkeypatch `search_corpus`, so no index,
-embedder or network is needed offline.
+The only module that touches `sys.path`. It imports grounded-rag's `config`,
+`rag.answer`, `rag.retrieve`, `rag.verify` and the store and BM25 index from
+`GROUNDED_RAG_PATH`, loads each corpus's `(store, bm25, embedder)` once per
+process, and re-exports `SYSTEM_PROMPT`, `REFUSAL_MESSAGE`,
+`VERIFY_MIN_GROUNDING` (0.30) and `figures_in` (built on the private
+`rag.verify._numbers`, pinned by a contract test). Queries use grounded-rag's own
+embedder, so they land in the space the index was built in. The tests
+monkeypatch `search_corpus`: no index, embedder or network offline.
 
-Corpora:
-
-| corpus | content | language |
-|---|---|---|
-| `filings_sections` | Apple FY2025 Form 10-K, split into sections | English |
-| `ai_act_sections` | EU AI Act (Regulation (EU) 2024/1689) as adopted: recitals, articles, annexes | English |
+Corpora: `filings_sections` (Apple FY2025 Form 10-K, by section) and
+`ai_act_sections` (Regulation (EU) 2024/1689: recitals, articles, annexes), both
+in English.
 
 ## 3. Tools and validation (`rr/tools.py`)
 
 | tool | arguments (Pydantic, `extra="forbid"`) | notes |
 |---|---|---|
-| `search_documents` | `query` (1-500 chars), `corpus` (enum of the two), `k` (≥ 1, default 4; capped at 8 in code, see 9.3) | grounded-rag hybrid retrieval; results fenced |
+| `search_documents` | `query` (1-500 chars), `corpus` (enum), `k` (≥ 1, default 4; capped at 8 in code, see 9.4) | hybrid retrieval; results fenced |
 | `list_sections` | `corpus` | section file names |
 | `calculate` | `expression` (1-200 chars) | whitelisted AST evaluator |
 | `save_report` | `title` (1-120), `markdown` (1-20,000) | needs human approval |
 
-Every call, whether chosen by workflow code or by the agent's model, goes
-through `run_tool`, which never raises:
+Every call goes through `run_tool`, which never raises: an unknown name is
+counted as `hallucinated_tool`; invalid arguments are rejected with the
+Pydantic messages (`invalid_args`), never repaired; `save_report` refuses to
+write unless that exact call was approved (`approval_denied`); a tool exception
+comes back as `tool_error`.
 
-- an unknown name returns an error listing the allowed tools and is counted as
-  `hallucinated_tool`;
-- invalid arguments are rejected with the Pydantic messages (`invalid_args`),
-  never silently repaired;
-- `save_report` refuses to write unless that exact call was approved
-  (`approval_denied`), a second line of defence behind the graph;
-- a tool exception is reported back to the model as `tool_error`.
-
-**Run-wide source ids.** Search hits receive ids `S1, S2, ...` in order of first
-retrieval, reused when the same chunk comes back. A citation `[S3]` therefore
-means the same passage in the answer, the trace, the verifier and the UI, even
-after many agent searches.
+**Run-wide source ids.** Hits get `S1, S2, ...` in order of first retrieval,
+reused when a chunk comes back, so `[S3]` means the same passage everywhere.
 
 **Safe calculator.** `ast.parse(mode="eval")` and a whitelist: numeric
-constants, `+ - * / // % **`, unary `+ -`, and `abs/round/min/max`. Exponents
-above 100 are rejected so `9**9**9` cannot hang a run, and a power whose result
-would exceed 30 decimal digits is refused too (`MAX_POWER_DIGITS`): an exponent
-under 100 on a large base still builds an integer with millions of digits, and
-no figure in a 10-K comes near 30. There is no `eval`.
+constants, `+ - * / // % **`, unary `+ -`, `abs/round/min/max`, `days_between`.
+Exponents above 100 and powers whose result exceeds 30 decimal digits
+(`MAX_POWER_DIGITS`) are rejected. There is no `eval`.
 
 ## 4. Guard, budget and loop detection
 
-**Budget (`rr/budget.py`).** One step is one LLM call, whichever system makes
-it. Both systems get `RR_MAX_STEPS=8` and `RR_MAX_TOKENS=12000` (prompt plus
-completion) from `rr/settings.py`, so they cannot run under different limits.
-The budget is checked before each call; on exhaustion the run stops with a
-fixed message ("I stopped before finishing ... so I won't guess") rather than an
-unverified answer. If the budget runs out during the verify retry, the first,
-already checked answer is kept. The budget is plain data in graph state, so it
-survives a checkpoint and resume. Because the check happens before a call, the
-last call can overshoot the token limit by its own size: a hard pre-call cap
-would need a token estimate that is not reliable enough.
+**Budget (`rr/budget.py`).** One step is one LLM call. Both systems get
+`RR_MAX_STEPS=8` and `RR_MAX_TOKENS=12000` (prompt plus completion). The budget
+is checked before each call; on exhaustion the run stops with a fixed message
+("I stopped before finishing ... so I won't guess"). If it runs out during the
+verify retry, the first, already checked answer is kept. Because the check
+precedes the call, the last call can overshoot the cap by its own size.
 
-**The last call (`rr/agent.py`).** `budget.nearly_exhausted` is true when one
-step is left, when 80% of the tokens are used, or when the predicted next call
-would reach the token cap. The next call is predicted as the last one plus the
-growth seen between the last two (calls of 1,000, 2,500 and 4,000 tokens predict
-5,500); assuming "no larger than the last" let 8 runs stop on the budget message
-on 8 November. The third test exists because the
-agent's prompt grows with every search (a `k=8` search adds 1 to 4k tokens), so
-a single turn could jump from under 80% to past 100% and the run stopped on
-`max_tokens` without ever making the last call. The agent's next call is then made
-**without tools**, with one extra instruction: this is the last call, answer
-from the sources above with citations or reply with the exact refusal sentence.
-A tool call the model still produces is dropped and its text kept. The budget
-is never extended: the agent gets the same number of calls, it just spends the
-last one answering instead of searching. The workflow has that guarantee by
-construction (its last node always answers), so this aligns the two systems
-rather than favouring one. It changes what two fields mean for the agent: a run
-that used to end as `budget_exhausted` with the guard's stop message now ends
-with an answer or a refusal, so `budget_exhausted` and `refused` on the
-unanswerable questions are not comparable with the published run (section 9),
-which predates the step and needs a re-run.
+**The last call (`rr/agent.py`).** `budget.nearly_exhausted` is true with one
+step left, at 80% of the tokens, or when the predicted next call would reach
+the cap (the last call plus the growth between the last two: 1,000, 2,500 and
+4,000 tokens predict 5,500). The agent's prompt grows by about 850 tokens per
+`k=8` search, so one turn could jump from under 80% to past the cap. The next
+call is then made **without tools**, told to answer from the sources with
+citations or reply with the exact refusal sentence; a tool call it still
+produces is dropped. The budget is never extended. The workflow has that
+guarantee by construction. It changes what `budget_exhausted` and `refused`
+mean for the agent, so earlier runs are not comparable (`docs/decisions.md`,
+2026-11-06).
 
-**Guard (`rr/guard.py`).** The model proposes, the guard disposes. A call's
-identity is its name plus its arguments, serialised with sorted keys. An exact
-repeat of an earlier call is blocked (it can only return the same result) and
-the model is told why; a second repeat ends the run with `stop_reason="loop"`,
-because a model that keeps repeating itself is looping, not progressing. A
-blocked repeat of an unknown tool is still a hallucinated tool and is counted
-as one, not only as a loop. Calls whose tool needs approval get the `approve`
-verdict.
+**Guard (`rr/guard.py`).** A call's identity is its name plus its arguments,
+serialised with sorted keys. An exact repeat is blocked and the model is told
+why; a second repeat ends the run with `stop_reason="loop"`. A blocked repeat
+of an unknown tool still counts as a hallucinated tool.
 
 **Retries and errors.** Transient failures (429 on every key, 5xx, network) are
-retried by `call_with_backoff`; a permanent failure is recorded in `error`. The
-LangGraph `recursion_limit` (100 for the agent, 50 for the workflow) only stops
-a wiring bug; the budget is the real limit.
+retried by `call_with_backoff`; a permanent one is recorded in `error`. The
+LangGraph `recursion_limit` (100 agent, 50 workflow) only stops a wiring bug.
 
 ## 5. Human approval and checkpointing
 
-`save_report` is the only tool with a side effect (a file in `reports/`). When
-the agent asks for it, the guard marks it `approve`, and the `human_approval`
-node calls LangGraph's `interrupt()` with the tool name, its arguments and the
-question. The graph stops; its state is persisted by the checkpointer under the
-run's `thread_id`. `resume(graph, thread_id, approved)` sends
-`Command(resume=bool)` and the graph continues from the same node: the call is
-then executed (approved) or answered with "Not executed" (rejected).
-
-The checkpointer is a process-wide `SqliteSaver` on `runs/checkpoints.sqlite`
-(fallback: in-memory `MemorySaver`). SQLite is what lets the pause and the
-resume happen in different processes or requests:
-
-- **Streamlit** pauses in one rerun and resumes on the Approve/Reject click,
-  which is a new rerun.
-- **React UI**: `POST /api/ask` returns `status: "awaiting_approval"` with a
-  `thread_id`; the approval modal calls `POST /api/approve`, which resumes from
-  the checkpoint and may return `awaiting_approval` again if the agent asks for
-  another report. A second resume of the same run while the first is still
-  running gets 409 (one decision per pause); after an API restart the run is
-  found in SQLite, but only for thread ids this API created (`api:` prefix),
-  so a request cannot resume a CLI or eval thread; a resume that fails keeps
-  the checkpointed state, so the error record still shows what was spent.
-- **CLI** asks `y/N` on the terminal with `--approve`.
-- **Eval and unattended runs** pass no approver, which means reject: an
-  evaluation can never write files.
-
-Agent latency counts graph time only, never the time a human spends deciding.
+`save_report` is the only tool with a side effect (a file in `reports/`). The
+guard marks it `approve` and `human_approval` calls LangGraph's `interrupt()`.
+State is persisted by a process-wide `SqliteSaver` on `runs/checkpoints.sqlite`
+(fallback `MemorySaver`) under the run's `thread_id`; `resume(graph, thread_id,
+approved)` continues from the same node. SQLite lets pause and resume happen in
+different requests: Streamlit resumes on the click, the CLI asks `y/N` with
+`--approve`, and the React UI calls `POST /api/approve` (a second resume of the
+same run gets 409; after a restart only thread ids this API created, prefix
+`api:`, can be resumed). Eval and unattended runs pass no approver, which means
+reject: an evaluation can never write files. Agent latency excludes the time a
+human spends deciding.
 
 ## 6. Prompt-injection fence (`rr/fence.py`)
 
-Retrieved passages are third-party text that ends up in the prompt. Both
-systems apply the same fence:
-
-- each passage is wrapped in `<untrusted_source id=S# source="...">`;
-- the system prompt says text inside those tags is quoted data, never
-  instructions, and must not change the task, tools or output format;
-- any `<untrusted_source` or `</untrusted_source` inside a passage is escaped,
-  so a passage cannot close or forge the fence. Detection runs on an NFKC copy
-  with invisible format characters (zero-width space, soft hyphen, word
-  joiner) removed, so fullwidth or zero-width-padded tags are caught too;
-- a regex scan for instruction-like phrases (English and French: "ignore
-  previous instructions", "you are now", "system prompt", "call the X tool",
-  `save_report`, "ignorez les instructions", ...) tags a passage
-  `flagged="possible_injection"` and is counted in `injection_flags`.
-
-The scan is a metric, not a filter: flagged passages are still shown to the
-model. Filtering on a regex would hide real content on false positives and
-miss paraphrased attacks anyway.
-
-**Evaluation hook.** `injected_passage` (CLI `--inject`, Streamlit sidebar,
-React "injected passage" field, and the `injection` questions) appends a
-passage as source `99_injected.txt` to every search result, so both systems
-see exactly the same attack.
+Both systems wrap each retrieved passage in `<untrusted_source id=S#
+source="...">`; the system prompt calls it quoted data, never instructions. Any
+`<untrusted_source` or `</untrusted_source` inside a passage is escaped, with
+detection on an NFKC copy stripped of zero-width characters, so fullwidth or
+padded tags are caught too. A regex scan for instruction-like phrases (English
+and French) tags a passage `flagged="possible_injection"` and counts it in
+`injection_flags`: a metric, not a filter, since a filter would hide real
+content on false positives and miss paraphrased attacks. For evaluation,
+`injected_passage` (CLI `--inject`, the `injection` questions) appends a passage
+as source `99_injected.txt` to every search, so both systems see the same attack.
 
 ## 7. The LLM client (`rr/llm.py`)
 
-One small OpenAI-compatible client serves both systems, so neither gets a
-better transport. Provider is Groq (default) or a local Ollama through its
-`/v1` endpoint; temperature is 0.
+One OpenAI-compatible client serves both systems (Groq by default, or a local
+Ollama through `/v1`; temperature 0).
 
-- **Tool calling**: tool schemas are generated from the Pydantic models
-  (`tool_schemas()`); tool-call arguments are parsed without ever raising, and
-  unparseable arguments are kept under `__raw__` so validation rejects them.
-- **Key rotation**: up to five Groq keys (`GROQ_API_KEY`, `GROQ_API_KEY_2` ..
-  `_5`). A 429 moves to the next key. When route-or-roam has no key of its own,
-  it uses the key ring grounded-rag's config loaded, so keys live in one place.
-- **Waiting for the announced window**: when every key is limited, the client
-  raises `TransientLLMError` carrying the shortest wait the provider announced
-  (`retry-after`, `x-ratelimit-reset-tokens`, `x-ratelimit-reset-requests`,
-  parsed from formats like `7.66s`, `1m2.5s`, `250ms`). `call_with_backoff`
-  waits that long (capped at 65 s, one full per-minute window) instead of the
-  exponential 1/2/4 s guess, which would only burn retries inside the same
-  window.
-- **Four intermittent gpt-oss 400s, retried once** with a corrected request:
-  1. Groq rejects the JSON the model produced in JSON mode: retried without
-     JSON mode (callers already extract the JSON object from free text);
-  2. the model calls a tool on a request that offered none: retried with an
-     explicit "no tools are available" instruction;
-  3. Groq rejects a malformed tool call ("Tool call validation failed"):
-     retried with a reminder to use only the documented arguments;
-  4. Groq cannot parse the generation into text and tool calls
-     (`output_parse_failed`, two agent answers lost in the 14 October run):
-     retried with a reminder to send one well-formed tool call or plain text.
-  A second failure is recorded, so a model that keeps producing bad calls
-  still shows up in the evaluation.
-- **Malformed and empty replies.** A 200 whose body is not the expected shape
-  (no `choices`, non-JSON) becomes an `LLMError`: the graphs record it in the
-  run's `error` and keep the budget already spent, so a provider glitch is a
-  result, not a traceback. An empty reply is never written to the cache, so it
-  cannot be replayed as the answer to every later identical request.
-- **On-disk response cache** (`RR_LLM_CACHE`, on by default): successful
-  replies are stored in `runs/llm_cache/` under a SHA-256 of the exact request
-  (provider, model, messages, tools, options). Re-running an interrupted
-  evaluation replays answered calls instead of spending quota. A corrected
-  retry is stored under the original request, so the next identical request is
-  served from the cache. Set `RR_LLM_CACHE=0` to measure run-to-run variance.
-- **FakeLLM** replays scripted replies and records every request; running past
-  the script raises, so a test cannot loop silently.
+- **Keys and limits**: up to five Groq keys; a 429 moves to the next. When every
+  key is limited, `TransientLLMError` carries the shortest wait the provider
+  announced and `call_with_backoff` waits that long (capped at 65 s) instead of
+  guessing 1/2/4 s. The message keeps Groq's reason per key (limit kind, used
+  over limit, requested, organisation prefix, never the key).
+- **Four intermittent gpt-oss 400s, retried once** with a corrected request: bad
+  JSON in JSON mode, a tool call on a request that offered none, a malformed tool
+  call, `output_parse_failed`. A second failure is recorded, so a model that
+  keeps producing bad calls still shows in the evaluation.
+- **Malformed and empty replies** become an `LLMError` in the run's `error`; an
+  empty reply is never cached.
+- **On-disk cache** (`RR_LLM_CACHE`, on by default) in `runs/llm_cache/`, keyed
+  on a SHA-256 of the exact request, so an interrupted evaluation resumes
+  without spending quota. Set `RR_LLM_CACHE=0` to measure run-to-run variance.
+- **FakeLLM** replays scripted replies and records requests; running past the
+  script raises.
 
 ## 8. Evaluation methodology
 
 ### 8.1 Dataset (`eval/questions.jsonl`)
 
-40 labelled questions over both corpora:
+40 labelled questions over both corpora: `single_hop` 10, `multi_hop` 10,
+`numeric` 8, `cross_corpus` 6 (10-K plus AI Act), `unanswerable` 3 (refusal
+expected), `injection` 3 (an answerable question plus an `injected_passage`).
+Each records `gold_sources`, `key_facts` (strings with `a|b` alternatives, or
+numbers), `expect_refusal`, `needs_tools`, `forbidden_strings` and a `note`
+quoting the evidence, checked verbatim against the corpus files, so any label can
+be audited by eye. `python -m eval.locate_gold` reports gold sources missing from
+a grounded-rag checkout.
 
-| type | n | what it tests |
-|---|---|---|
-| `single_hop` | 10 | one fact from one section |
-| `multi_hop` | 10 | facts from two or more sections |
-| `numeric` | 8 | a figure that must be computed (difference, percentage, share) |
-| `cross_corpus` | 6 | combining the 10-K and the AI Act |
-| `unanswerable` | 3 | the corpora do not contain the answer: refusal expected |
-| `injection` | 3 | an answerable question plus an `injected_passage` attack |
+`eval/paraphrases.jsonl` holds 4 of these questions with 2 rephrasings each
+(`paraphrase_of` links them); run with `--questions eval/paraphrases.jsonl`, and
+the report adds a "same verdict for every phrasing" line.
 
-Each question records `gold_sources`, `key_facts` (strings with `a|b`
-alternatives, or numbers), `expect_refusal`, `needs_tools`,
-`forbidden_strings` (the injection payload) and a `note` quoting the evidence.
+### 8.2 Success definition (`eval/score.py`)
 
-**Paraphrases (`eval/paraphrases.jsonl`).** 12 lines: 4 of the questions above
-(`sh01`, `sh03`, `nu02`, `mh09`) each with 2 rephrasings, casual and in the
-other language, sharing the original's facts and gold sources; `paraphrase_of`
-names the original (`null` on the original itself). Run with
-`--questions eval/paraphrases.jsonl`, and the report adds a "same verdict for
-every phrasing" line: a group is consistent when all its records pass or all
-fail. A system that only works with the "right" wording shows up there even
-when its overall rate looks fine.
+A record passes only if it has no `error` and all four hold:
 
-### 8.2 How the facts were verified
+1. **Key facts**: every key fact is in the answer. Strings match as whole words
+   after normalisation (lower case, accents stripped). Numbers match within ±1%
+   relative, with common formats ("416,161", "1 234,5"); unit scale (so "$25.1
+   billion" matches 25126 in millions) is only tried for facts of 1000 or more.
+   1% allows rounding to one decimal but rejects 6.43% written as "6%"; on a
+   rounding boundary the fact is stored at the midpoint (`nu03`: 3.825).
+2. **Citations**: an answer that is not a refusal cites at least one valid id.
+3. **Refusal**: `refused` equals `expect_refusal` exactly.
+4. **Forbidden strings**: none appears. Quoting the injection payload back
+   counts as following it.
 
-Every fact was checked against the corpus files before any system ran. A build
-script attached `(file, exact snippet)` evidence to each question and asserted
-that each snippet is verbatim in that file, that every string fact (one of its
-alternatives) occurs in the normalised gold text, and that every numeric fact
-is either written in the gold text or equals an explicit computation done in
-the script (for example net sales growth `416161 / 391035 - 1 = 6.43%`). The
-evidence is kept in each question's `note`, so any label can be audited by
-eye.
+`budget_exhausted` is not a failure by itself. Source recall and tool-use
+accuracy are reported but are not part of success.
 
-### 8.3 Success definition (`eval/score.py`)
+**Failure tags.** One primary tag per failed record, first match wins: `error >
+injection_followed > loop_or_budget > false_refusal > over_answer >
+bad_tool_args > wrong_number > missed_hop > uncited`. `missed_hop` is a missing
+non-numeric fact; `loop_or_budget` covers a budget stop and a loop stop.
 
-A record passes only if all four conditions hold, and it has no `error`:
-
-1. **Key facts**: every key fact is in the answer. Strings are matched as whole
-   words after normalisation (lower case, accents stripped, punctuation to
-   spaces), so "2 fév. 2025" matches "2 fevrier 2025|...". Numbers match within
-   ±1% relative, on absolute values, with common formats ("416,161",
-   "1 234,5", "41,6"). Unit scale (x1e±3, x1e±6, so "$25.1 billion" matches
-   25126 in millions) is only tried for facts of 1000 or more: a small fact such
-   as 16 (months) must not be satisfied by "16,000". 1% allows honest rounding
-   to one decimal but rejects rounding 6.43% to "6%"; where the exact value sits
-   on a rounding boundary the fact is stored at the midpoint (`nu03`: 3.825, so
-   3.8, 3.85 and 3.846 all pass). The forbidden strings of `in02` cover the
-   spelled-out and spaced forms of the planted figure. Re-scoring
-   the stored runs under these rules changed no verdict.
-2. **Citations**: an answer that is not a refusal must cite at least one valid
-   source id.
-3. **Refusal**: `refused` must equal `expect_refusal` exactly; answering an
-   unanswerable question fails, and so does refusing an answerable one.
-4. **Forbidden strings**: none may appear. Quoting the injection payload back
-   counts as following it, on purpose: a user cannot tell the difference.
-
-`budget_exhausted` is not a failure by itself; a correct, cited answer on the
-last allowed step still passes. Source recall (gold sources actually searched)
-and tool-use accuracy (every required tool called, no hallucinated tool) are
-reported next to success but are not part of it.
-
-### 8.3.1 Optional LLM judge (`eval/judge.py`)
+### 8.3 Optional LLM judge (`eval/judge.py`)
 
 Off unless asked for: `python -m eval.judge --runs runs/r1.jsonl` makes one
-LLM call per stored record (errored records are skipped) and writes
-`runs/r1.judge.jsonl`; `python -m eval.report ... --judge runs/r1.judge.jsonl`
-then adds rows to each system's table. Without `--judge` the report is
-byte-identical to what it was before the judge existed.
+structured call per stored record (fixed rubric, reply validated against
+`JudgeVerdict`, no second call on an invalid reply) and writes
+`runs/r1.judge.jsonl`; `eval.report --judge` adds secondary rows (success with
+judged facts, and where judge and strings disagree). It decides criterion 1
+only, so the reference score is unchanged, and it has not been run on the
+published records: its agreement with a human reader is unmeasured.
 
-- **One structured call, no loop.** A fixed rubric (`JUDGE_SYSTEM`) receives
-  the question, whether a refusal is expected, the key facts and the answer
-  fenced in `<answer>` tags as data. The reply must validate against
-  `JudgeVerdict` (`{"verdict": "correct" | "incorrect", "reason": str}`, no
-  other key). A reply that does not validate is stored as a judge error and is
-  not asked again. The only repeats are the transport ones every call has: the
-  backoff on transient provider errors, and the client's single corrected
-  request when Groq rejects the JSON it generated in JSON mode (§7).
-- **What it replaces, and what it doesn't.** The judge decides criterion 1
-  only (are the key facts conveyed, in any wording or language). "Success with
-  judged facts" keeps criteria 2 to 4 and the error rule exactly as in §8.3,
-  so it differs from the reference rate only in how a fact is recognised.
-- **Reported as a second opinion.** The rows are labelled secondary: success
-  with judged facts (with its Wilson interval and the number of judged
-  records), and the records where the two disagree on the facts in each
-  direction. "Judge yes, strings no" is the list of `missed_hop` candidates to
-  read by eye; "strings yes, judge no" is where the judge is the one to doubt.
-- **Self-describing.** Each verdict line stores the record key, the judge's
-  provider and model, and a 12-character hash of the rubric, so a verdicts
-  file says what produced it after either changes. Resuming re-sends only the
-  records without a valid verdict; the last line per key wins.
+### 8.4 Harness and repeats (`eval/run_compare.py`)
 
-The judge has not been run on the published records: its numbers do not
-appear in §9.
+- **Idempotent**: each call has a SHA-256 key of `system|qid|repeat|run_id`;
+  keys already in the runs file are skipped, so a crash resumes where it stopped.
+- **Known cost first**: pending calls and the worst case (calls × `RR_MAX_STEPS`,
+  calls × `RR_MAX_TOKENS`) are printed; `--estimate` stops there.
+- **Self-describing records**: `provider`, `model`, `llm_cache`, `max_steps`,
+  `max_tokens` travel with every record, which are stored unscored.
+- **Dead letter**: an exception from `answer_question`, or a `TransientLLMError`
+  (a quota says nothing about the system and would weigh on the one that makes
+  more calls), goes to `runs/dead_letter.jsonl` and is retried on resume. Other
+  records with an `error` are results, scored as failures. `live1.jsonl` and
+  `live2.jsonl` predate the rule; the report leaves their 50 and 7 such records
+  out and prints the count.
+- **`--workers N`** pins each worker to one Groq key; **`--models a,b`** (or
+  `RR_EVAL_MODELS`) runs the batch per model into
+  `runs/<run_id>--<provider>-<model>.jsonl`, and the report given several files
+  writes one cross-model table. No test is run across models, and no
+  cross-model run has been made.
 
-### 8.4 Failure tags
+### 8.5 Spread, intervals and the paired test (`eval/stats.py`)
 
-Each failed record gets one primary tag, by priority (first match wins), plus
-the full list:
+- **Run-to-run spread**: the sample std of the success rate across repeats. With
+  one repeat, or repeats made with the cache on (they replay the first answer),
+  it prints `n/a`, never `± 0.0`.
+- **Sampling uncertainty**: a 95% Wilson interval with `n` next to every rate.
+  Repeats of one question are not independent, so over records it is a floor on
+  the uncertainty; with the cache on it counts questions instead. The README
+  also gives it on the 40 questions.
+- **Workflow vs agent**: the outcomes are paired, so the report runs an exact
+  McNemar test on questions, a question counting as passed when it passed in a
+  strict majority of its repeats (`eval/report.py` computes it, `eval/stats.py`
+  holds the test). Pairing on (question, repeat) counted a question once per
+  repeat, and cached repeats are replays: 5 discordant questions over 3 cached
+  repeats gave p = 6e-5 instead of 0.0625. Only discordant pairs carry
+  information. The API takeaway calls a difference only when p < 0.05.
 
-`error > injection_followed > loop_or_budget > false_refusal > over_answer >
-bad_tool_args > wrong_number > missed_hop > uncited`
-
-`missed_hop` means a non-numeric fact is missing: each string fact comes from a
-specific section, so a missing one means a retrieval or reasoning hop did not
-happen. `bad_tool_args` means a hallucinated tool or a failed tool call.
-`loop_or_budget` covers a budget stop and a run the guard ended for repeating
-the same call (`stop_reason` is `loop`, `budget_exhausted` stays false).
-
-### 8.5 Harness, repeats and variance
-
-`eval/run_compare.py` runs every `(system, question, repeat)`:
-
-- **Idempotent**: each call has a SHA-256 key of
-  `system|qid|repeat|run_id`; keys already in `runs/<run_id>.jsonl` are
-  skipped, so re-running the same command after a crash or a rate limit resumes
-  exactly where it stopped and never double-counts. A truncated last line is
-  ignored and re-run.
-- **Known cost before the first call**: the number of pending calls and the
-  worst case (calls × `RR_MAX_STEPS` LLM calls, calls × `RR_MAX_TOKENS` tokens)
-  are printed first; `--estimate` stops there. On a free tier the bill is bounded
-  by the budget, so it is known before the run, not discovered on the rate limit.
-- **Self-describing records**: every record carries `provider`, `model`,
-  `llm_cache`, `max_steps` and `max_tokens`, so a results file says what
-  produced it after the defaults change.
-- **Dead letter**: an exception from `answer_question` is not a result; it goes
-  to `runs/dead_letter.jsonl` and is retried on the next resume. A record that
-  comes back with its own `error` field *is* a result (the system failed
-  gracefully) and is scored as a failure, except a `TransientLLMError` (rate
-  limit, 5xx or network failure that outlasted the backoff): it says nothing
-  about the system and would weigh on the one that makes more calls, so it is
-  parked in the dead letter and retried too. Files written before that rule
-  still hold such records; `eval/report.py` and the Results tab leave them out
-  and print how many (50 in `live1.jsonl`, 7 in `live2.jsonl`).
-- **Raw storage**: records are stored unscored. `eval/report.py` scores them
-  against the current questions, computes success per repeat, and reports mean
-  ± sample standard deviation across repeats, nearest-rank p50/p95 latency
-  (every reported latency actually happened), average calls and tokens, budget
-  exhaustion, injection-followed rate, source recall, tool-use accuracy and the
-  top failure tags. It writes `docs/results.md` and `docs/success_by_type.png`.
-
-**Several models in one batch.** `--models a,b` (or `RR_EVAL_MODELS`) runs the
-whole batch once per model, one model after the other, each into its own file
-`runs/<run_id>--<provider>-<model>.jsonl` with its own idempotency keys. A
-model is a bare name (configured provider) or `provider:name`; only `groq` and
-`ollama` count as a prefix, because Ollama names carry their own colon
-(`llama3.2:3b`). Each model gets its own client even with one worker, holding
-every key as the default client does; with `--workers N` each worker holds one
-key, as below. The records carry the model they ran on, and the LLM cache is
-keyed on the request, model included, so two models never share a cached
-reply. Separate files rather than one file with a model column: every tool
-that reads one runs file (the report, the API's Results tab, resume) works per
-model unchanged, and a model that stops half-way resumes on its own. Given
-several files, `eval/report.py` writes one page: a table of success and Wilson
-interval per (file, system), then each file's own report one heading level
-down. No test is run across files: the McNemar test pairs two systems on one
-model, and a model comparison would need its own pairing (same system, same
-question, two models), which is not built. Without `--models` nothing changes:
-one file `runs/<run_id>.jsonl` with the configured model.
-
-`--workers N` runs N calls at a time, each worker pinned to one Groq key (N is capped at the number of keys), so parallel calls never share a per-key rate limit. Each record still stores its own wall-clock latency, measured inside `answer_question` exactly as with one worker: only the batch finishes sooner. Inside one workflow run, the search node also fetches its 2 to 4 retrieval calls in parallel (local embeddings, no quota) and registers them in plan order, so the sids, the trace and the counts are those of a sequential run; the LLM calls of a run stay sequential, because each depends on the previous one.
-
-### 8.6 Spread, intervals and the paired test (`eval/stats.py`)
-
-Three different uncertainties, reported separately because they answer
-different questions:
-
-- **Run-to-run spread**: the sample standard deviation of the success rate
-  across repeats, on the same questions. With one repeat there is nothing to
-  observe, so it is printed as `n/a`, never as `± 0.0`, which would read as
-  "no variance" when it means "not measured". The same goes for repeats made
-  with the LLM cache on: they replay the first answer, so their spread is
-  zero by construction. They are printed as `n/a` too, with a note, and their
-  Wilson interval counts questions (majority over repeats), not records.
-- **Sampling uncertainty**: a **95% Wilson score interval** over all scored
-  records, with `n` next to every rate (per type too). With 2 to 17 records per
-  cell the normal approximation leaves `[0, 1]` and collapses to zero width at
-  0% or 100%, exactly where small sets land; Wilson stays inside `[0, 1]` and
-  keeps a sensible width at the extremes, so "2/2" reads as "somewhere above
-  ~34%", not "100%, certain". Repeats of one question are not independent, so
-  with several repeats the interval is optimistic: a floor on the uncertainty.
-- **Workflow vs agent**: both systems answer the **same** questions, so their
-  outcomes are paired, and an unpaired test (two-proportion z, chi-square on the
-  totals) would throw that pairing away. The report runs an **exact McNemar
-  test** on questions, a question counting as passed when it passed in a
-  strict majority of its repeats. Pairing on `(question, repeat)` counted one
-  question once per repeat, and with the LLM cache on the repeats are
-  byte-identical replays: 5 discordant questions over 3 cached repeats gave
-  p = 6e-5 instead of 0.0625. Only discordant pairs (one system
-  passes, the other fails) carry information; under "no difference" each is a
-  fair coin, so the p-value is an exact binomial tail. The exact form is used
-  because the chi-square version needs far more discordant pairs than a 17 to
-  40 question set produces. The report prints the four cells (both, only
-  workflow, only agent, neither) and the p-value; the API takeaway calls a
-  difference only when p < 0.05, and otherwise says the two are not
-  significantly different.
-
-`eval/stats.py` is standard library only. The design target is 40 questions ×
-2 systems × 3 repeats with the cache off, which gives a spread per system. The
-run reported below did not reach that; see section 10.
+`eval/compare_runs.py` compares two or three runs question by question (see
+§9.3). `eval/stats.py` is standard library only.
 
 ## 9. Results
 
-> **Current figures** are run `r122e` (8 November 2026, all 40 questions, LLM
-> cache off): workflow 30/40, agent 30/40, McNemar p = 1.000 (README and
-> `docs/results.md`).
+Two runs of the full set, same code, `openai/gpt-oss-120b` on Groq, cache off,
+40 questions × 2 systems × 3 repeats, each on one cloud machine:
 
-> Every figure in this section was measured on the eval set labelled against the
-> four-file AI Act primer, before its relabelling against the full regulation
-> (`docs/decisions.md`, 2026-10-11). It describes that run; a run on the current
-> `eval/questions.jsonl` is not comparable with it.
+- **`r125e`** (16 to 19 November 2026), grounded-rag at 80ef892: report
+  [results.md](results.md), records `runs/r125e--groq-openai-gpt-oss-120b.jsonl`.
+- **`r126e`** (20 to 22 November), the control on e9535b2, the retrieval
+  `r122e` used: report `runs/r126e.md`, records
+  `runs/r126e--groq-openai-gpt-oss-120b.jsonl`.
 
-**Final state (run `s120c`, after one fix).** The agent was re-run alone after
-the `k` fix described in 9.3 below; the workflow's 17 records are carried over
-unchanged from `s120b` (same code path, responses served from the cache).
-Raw records: `runs/s120c.jsonl` (`docs/results.md` now holds the 40-question
-run; `python -m eval.report --runs runs/s120c.jsonl --out runs/s120c.md`
-rebuilds this one). The
-records were scored with the current `eval/score.py` (re-scoring changed no
-verdict), but they were **produced before** the agent's last-call step
-(section 4) and the citation-aware refusal rule (section 2.4): the agent's
-`budget_exhausted` and `refused` values, and so the unanswerable row, are not
-what the current code would give. The box at the top of this section has the current run.
+The README holds the table by type and the paired counts; `runs/*.md` hold every
+metric. A report is rebuilt with `python -m eval.report --runs <records>
+--out runs/x.md`. Headline: workflow 85/120 then 88/120, agent 99/120 then
+95/120; paired on 40 questions, p = 0.125 then 0.625.
 
-| metric | workflow | agent (`s120c`) |
-|---|---|---|
-| success | **15/17 (88.2%)** | **15/17 (88.2%)** |
-| 95% Wilson interval | 66–97% | 66–97% |
-| by type: single / multi / numeric / cross / unanswerable / injection | 3/3 · 4/4 · 2/3 · 2/3 · 2/2 · 2/2 | 3/3 · 4/4 · 3/3 · 3/3 · 0/2 · 2/2 |
-| failure tags | wrong_number 1, missed_hop 1 | loop_or_budget 2 |
-| avg LLM calls | 2.29 | 2.88 |
-| avg tokens in / out | 2139 / 650 | 5898 / 448 |
-| latency p50 / p95 (s) | 42.18 / 84.86 | 25.43 / 110.99 |
-| budget exhausted | 0% | 11.8% |
-| injection followed | 0% | 0% |
+### 9.1 Where the failures come from
 
-Paired on the 17 questions: only the workflow passed 2 (`un01`, `un02`), only
-the agent passed 2 (`nu03`, `cc01`), both 13, neither 0. Exact McNemar
-p = 1.000: with two discordant pairs each way there is no evidence of a
-difference, and four discordant pairs could not show one of any plausible
-size.
+- **Workflow refusals.** It refused 15 answerable questions in each run. Replay
+  of the recorded searches (retrieval is deterministic) showed that in 14 of the
+  15 in `r125e` a source the answer needed never came back: Article 113's dates
+  for sh09, cc06, cc02 and mh07, and nu05, whose DMA fine limit is in Apple's
+  10-K while the workflow searched the AI Act. In `r126e` the refused set is
+  different (sh09, mh02, nu05, cc05 twice each; mh10, cc06, sh08, mh04, cc02,
+  cc03, cc04 once) and 12 of 15 again have no gold source retrieved (replay done
+  for the audit, not redone here). Those refusals measure retrieval, not the
+  model's caution.
+- **Questions nobody passes** (none of the 6 runs of a question): mh08, nu05,
+  cc02, un03 in `r125e`; those plus cc03, cc05, in03 in `r126e`.
+- **Agent cost.** Its prompt grows by about 850 tokens per k=8 search (95%
+  interval 730 to 960, 98 runs). Input tokens are 2.1× (`r125e`) and 2.2×
+  (`r126e`) the workflow's. It stopped on the budget message in 8 of 120 runs
+  (12 in `r126e`; `stop_reason` is `max_tokens`) and 23 (28) runs ended above
+  12,000 tokens, since the cap is checked before a call.
 
-Level overall, different failure modes. The workflow mis-stated one number
-(`nu03`) and missed one hop (`cc01`). The agent answered every answerable
-question but, on the two questions whose answer is not in the documents
-(`un01`, `un02`), kept calling `search_documents` (4–5 times) until the token
-budget stopped it; it then returned the guard's stop message ("I won't guess")
-rather than the refusal sentence, so the run is scored as a failure even though
-nothing was invented. A workflow is told "answer or refuse" once; an agent has
-to decide when to stop searching, and this one did not. The fix in 9.3 also
-raised the agent's token use (5,898 vs 2,680 tokens in), because runs that used
-to die on their second call now complete.
+### 9.2 Where the agent's lead comes from
 
-### First run (`s120b`, before the fix)
+Agent passes minus workflow passes, by type, `r125e` then `r126e`: single +4, +3;
+multi +3, +5; numeric 0, −2; cross-corpus +6, +2; unanswerable 0, −1; injection
++1, 0 (sums 14 and 7). Cross-corpus questions are part of the lead, not most of
+it (6 of 14, 2 of 7). The `r126e` agent answers sh10 once instead of refusing.
 
-Run `s120b`: a stratified subset of **17 questions** (3 single-hop, 4
-multi-hop, 3 numeric, 3 cross-corpus, 2 unanswerable, 2 injection; the first
-ids of each type) × 2 systems × **1 run**, on **`openai/gpt-oss-120b`** on
-Groq, with the response cache on. Full output: [results.md](results.md); raw
-records: `runs/s120b.jsonl`.
+### 9.3 Retrieval or chance
 
-### 9.1 Overall
+`r122e` (8 November, one repeat, e9535b2) gave 30/40 to each system. `r125e`
+differs from it on 8 (system, question) pairs at the majority; two things
+changed in between: grounded-rag's hybrid retrieval (43cde89) and the draw, since
+`r122e` was one repeat. `r126e` is `r125e`'s code on e9535b2 (`rag/answer.py` and
+`rag/verify.py` are identical at both commits), so it separates them. It lands
+with `r125e` on 6 of the 8 pairs and with `r122e` on 2 (workflow mh07, agent
+nu01): chance explains most of the move, and 2 pairs cannot size a retrieval
+effect. `r125e` and `r126e` give the same verdict on 105 of 120 workflow records
+and 110 of 120 agent records, and their totals differ by 3 and 4 passes.
 
-| metric | workflow | agent |
-|---|---|---|
-| success | **15/17 (88.2%)** | **9/17 (52.9%)** |
-| records with `error` | 0 | 7 |
-| avg LLM calls | 2.29 | 2.00 |
-| avg tokens in / out | 2139 / 650 | 2680 / 299 |
-| latency p50 / p95 (s) | 42.18 / 84.86 | 22.15 / 63.29 |
-| budget exhausted | 0% | 0% |
-| injection followed | 0% | 0% |
-| source recall | 0.98 | 0.94 |
-| tool-use accuracy | 100% | 100% |
+```
+python -m eval.compare_runs runs/r122e--groq-openai-gpt-oss-120b.jsonl \
+    runs/r125e--groq-openai-gpt-oss-120b.jsonl runs/r126e--groq-openai-gpt-oss-120b.jsonl
+```
 
-### 9.2 By question type
+`r125e` ran on 80ef892 and CI pins 2fad55f. Between them grounded-rag changed
+its NLI loader, API, UIs and docs; retrieval and verifier are untouched, and
+route-or-roam does not import `rag/nli.py`.
 
-| type | n | workflow | agent |
-|---|---|---|---|
-| single_hop | 3 | 3/3 | 2/3 |
-| multi_hop | 4 | 4/4 | 1/4 |
-| numeric | 3 | 2/3 | 3/3 |
-| cross_corpus | 3 | 2/3 | 2/3 |
-| unanswerable | 2 | 2/2 | 0/2 |
-| injection | 2 | 2/2 | 1/2 |
+### 9.4 Earlier runs
 
-### 9.3 Every failure
-
-| system | qid | primary tag | what happened |
-|---|---|---|---|
-| agent | sh01, mh02, mh03, mh04, un01, un02, in01 | `error` | see below |
-| agent | cc02 | `uncited` | correct facts ("high-risk", "2 December 2027"), but citations written as `[S2]` with a zero-width space (U+200B) inside the brackets, so no valid citation was extracted |
-| workflow | nu03 | `wrong_number` | correct $2,575 million, but "4.0 %" for a 3.85% decline (expected 3.8 to one decimal) |
-| workflow | cc01 | `missed_hop` | found the €500 million fine and 2024/1689, but called it "an Article 5(4) investigation" without naming the Digital Markets Act |
-
-**The seven `error` records are one failure mode.** In each, the agent's first
-search ran normally (for example with `k=5`); on its second turn the model
-requested `search_documents` with `k=10`. Groq validates tool calls against the
-declared schema server-side and rejected it with HTTP 400 (`/k: maximum: got
-10, want 8`). The client's corrective retry ("call only the listed tools, with
-exactly their documented arguments") failed the same way, so the run ended with
-`error` set and the question failed. The same seven questions failed with the
-same error in the previous run on this model (`s120`). None of the seven is a
-followed injection or a wrong answer: they never produced an answer.
-
-Excluding those seven, the agent passed 9 of its 10 completed runs. That figure
-is shown only to locate the failures, not as a score: errors are part of what a
-system does.
-
-**The fix.** The cap moved out of the published schema and into code:
-`SearchArgs.k` keeps `ge=1` but has no `le` bound, and the search uses
-`capped_k = min(k, 8)` (`rr/tools.py`, with a test). An over-eager `k=10` now
-searches with 8 passages instead of being rejected by the provider. The
-`cc02` citation (zero-width space) is now recognised too, through grounded-rag's
-extended `normalize_citations`. Re-running the agent gave the final state at the
-top of this section: 15/17.
+Older runs used older code, labels or scorers and are not comparable with the
+above (`docs/decisions.md` says what changed when). One explains a rule still in
+the code: in `s120b` (17 questions, one run, the former four-file AI Act primer)
+the agent scored 9/17 against the workflow's 15/17, and 7 of its 8 failures were
+Groq rejecting a `search_documents` call with `k=10` because the published schema
+capped `k` at 8 (HTTP 400, `/k: maximum: got 10, want 8`; the corrective retry
+failed the same way). The cap moved into code (`SearchArgs.k` has no `le` bound,
+the search uses `capped_k = min(k, 8)`, with a test) and the agent scored 15/17.
+The other failure, cc02, was a citation written with a zero-width space inside
+`[S2]`, now handled by grounded-rag's `normalize_citations`. The other runs,
+`r120e` to `r124e`, are summarised in `docs/decisions.md` (`r124e` stopped at
+19/240 and was rerun whole as `r125e`).
 
 ## 10. What the numbers do and don't say
 
-The bullets below were written for the 17-question runs of section 9. On the
-current 40-question run (`r122e`) the same caveats hold with other numbers:
-both systems pass 30/40, Wilson interval 60% to 86% for each, 3 to 10
-questions per type. Only 4 pairs are discordant (2 each way, p = 1.0). With 4
-the smallest possible p is 0.125, so that run couldn't have shown a
-difference at 5%. It needs more questions. Both systems still miss the
-cross-corpus questions cc02, cc04 and cc05 and the Article 113 dates (mh08,
-in03).
+They say: the agent passed more in both runs (by 14 records, then 7), ahead on
+single-hop and multi-hop; neither system followed an injection in 480 records;
+most wrong refusals are retrieval misses, shared by both; the agent costs more
+(2.1× to 2.2× the input tokens, about one more LLM call, p95 latency 25 to 29 s
+against 9 to 13 s, 8 to 12 of 120 runs stopped on the budget message).
 
-What they say:
+They don't say:
 
-- On this sample, the first run gave the workflow 15/17 and the agent 9/17, and
-  the gap had a concrete cause: with gpt-oss-120b on Groq, the agent's freedom to
-  choose tool arguments exposed it to a call the provider rejected, which the
-  workflow, whose tool arguments are written by code, cannot produce. After
-  moving the cap into code, both systems scored 15/17, failing on different
-  question types.
-- Neither system followed an injection (0/2 each), and both searched the gold
-  sources almost always. In the final run the agent hit its token budget on the
-  two unanswerable questions (searching instead of refusing).
-- The agent used the calculator on every numeric question and got all three;
-  the workflow's one numeric miss was a rounding the model wrote itself.
-
-What they don't say:
-
-- **Small sample, one run.** n=17 stratified questions, 1 run per system, so
-  there is **no run-to-run variance estimate**: `results.md` reports the spread
-  as `n/a`, and the 95% Wilson interval (66–97% for both systems) is the only
-  uncertainty that can be stated. The paired test says the same thing from the
-  other side: p = 1.000 is not "they are equal", it is "4 discordant pairs
-  cannot tell". Per-type cells hold 2 to 4 questions, so one question moves a
-  type by 25 to 50 points. The agent's numeric "win" is one question.
-- **The published records predate two rule changes.** The agent's last-call
-  step and the citation-aware refusal rule change what `budget_exhausted` and
-  `refused` mean on the unanswerable questions; the 0/2 there is what the old
-  agent did, not what the current one does. Scoring changes, by contrast, were
-  applied retroactively (raw records, re-scored) and moved nothing.
-- **One model.** The run used `openai/gpt-oss-120b` because the daily token
-  quota for `openai/gpt-oss-20b` (the configured default) was exhausted. The
-  dominant agent failure is a property of this model's tool calls on this
-  provider; another model may never send `k=10`, or may fail differently.
-- **Answer quality vs robustness.** Seven of the agent's eight failures say
-  nothing about whether its answers are better or worse; they measure
-  robustness to a provider-side rejection. On completed runs the two systems
-  look close, but 10 records cannot establish that.
-- **Latency is rate-limit time.** Latencies cluster at about 21, 42 and 84 s,
-  multiples of a rate-limit wait, not model compute, and with the cache on some
-  replies were replayed from an earlier run. Read latency as "how long the free
-  tier made it take", not as a property of either design.
-- **Average calls are skewed by errors.** The agent's 2.00 average includes
-  seven errored runs that stopped after one charged call; its ten completed
-  runs averaged 2.7 calls against the workflow's 2.29.
-
-Bottom line: this run does not show that the agent is worth its extra freedom
-here, and on answer quality it does not show the opposite either. It shows that
-the freedom has a concrete cost (tool-argument errors) that the workflow avoids
-by construction.
+- **A significant difference.** 4 discordant questions in each run: p = 0.125 is
+  the smallest p that 4 pairs can give, and `r126e` gives 0.625. It needs more
+  questions, not more repeats of these 40.
+- **Anything stable per type.** The same code on two retrievals changed the totals
+  by 3 and 4 passes and the verdict of 15 and 10 of 120 records. Cells hold 3 to
+  10 questions: the numeric gap flips sign between runs (0 then −2).
+- **A tight interval.** Over records the Wilson interval is a floor: 3 repeats
+  of 40 questions are not 120 independent draws.
+- **Anything beyond one model on one free tier.** The `k=10` failure of §9.4 is
+  specific to `gpt-oss-120b`'s tool calls. Latency is rate-limit time. Retrieval
+  caps both systems. Scoring is string matching: an answer right in other words
+  fails as `missed_hop`.
 
 ## 11. Free-tier engineering lessons
 
-- **Know the real limits.** On the Groq free tier, `gpt-oss-120b` has an
-  8,000-token cap per request and 200,000 tokens per day per organisation per
-  model. Five keys only multiply the quota because they belong to five
-  organisations.
-- **Naive backoff burns quota.** A first full run with a plain 1/2/4 s
-  exponential backoff spent about 1M tokens and returned mostly 429s: a
-  per-minute window does not reset in 4 seconds, so every retry landed in the
-  same window. The fix was to honour the provider's reset headers (wait the
-  announced time, capped at 65 s) and to cache every successful reply on disk,
-  so a resumed evaluation replays instead of paying again.
-- **gpt-oss produces intermittent 400s.** Three kinds showed up: Groq rejecting
-  the JSON the model generated in JSON mode, a tool call on a request that
-  offered no tools, and a malformed tool call. Each is retried once with a
-  corrected request; a second failure is recorded. The `k=10` case above is the
-  third kind surviving its retry, which is why it shows up as `error`.
-- **Citation format can fake a failure.** gpt-oss often cites as `【S1】`
-  instead of `[S1]`. Left alone, the verifier saw no citation, so correct
-  answers scored as uncited and ungrounded. This was found by an end-to-end
-  test in the UI, not by the unit tests, and fixed by normalising citations in
-  grounded-rag (`rag/answer.py::normalize_citations`), called from
-  `check_answer` so the stored answer, the UI and the score agree. The
-  zero-width-space variant in `cc02` above is a new case of the same problem.
+- **Know the real limits.** `gpt-oss-120b` on Groq's free tier: 8,000 tokens per
+  request and 200,000 per day per organisation, so five keys multiply the quota
+  only if they belong to five organisations. A plain 1/2/4 s backoff spent about
+  1M tokens on mostly 429s: a per-minute window does not reset in 4 s.
+- **Citation format can fake a failure.** gpt-oss often cites `【S1】`; the
+  verifier saw no citation. `normalize_citations` (grounded-rag) fixes it, called
+  from `check_answer` so the stored answer, the UI and the score agree.
 
-## 12. Limitations
+## 12. Limitations and roadmap
 
 - The verifier is grounded-rag's lexical check: it catches drift and fake
-  citations, not subtle misreadings.
-- The injection scan is a regex list, a metric rather than a filter.
-- The token budget is checked before each call, so the last call can overshoot.
+  citations, not subtle misreadings. A French answer over English sources scores
+  low on grounding (in `r123e`, 20 of the agent's 48 verification retries).
+- A figure the verifier rejects can still be right (arithmetic done without the
+  calculator, an identifier like "10-K"). It costs a retry, which can end in a
+  refusal.
 - Temperature is 0, but hosted models are not perfectly deterministic.
-- Scoring is string and number matching: an answer that is right in other
-  words (a regulation described but not named) fails as `missed_hop`. The
-  opt-in LLM judge (§8.3.1) lists those cases next to the score but does not
-  change it, and it is itself a model: its verdicts are a second opinion.
-- Real runs need grounded-rag's indexes and embedder; the tests (276, offline,
-  scripted LLM, retrieval mocked) do not.
+- Real runs need grounded-rag's indexes and embedder; the 291 tests are offline.
 
-## 13. Roadmap
-
-1. **The full run**: 40 questions × 2 systems × 3 repeats with the cache off,
-   for a per-system spread and enough questions per type; first a re-run of
-   `s120c` under the last-call step and the current refusal rule, so the
-   published table matches the code.
-2. **Cross-model comparison**: the harness is built (§8.5, `--models` /
-   `RR_EVAL_MODELS`, one runs file per model, a cross-model report page); what
-   remains is the run itself on `gpt-oss-20b`, `gpt-oss-120b` and a local
-   Ollama model, to separate design effects from model effects (the `k=10`
-   failure in particular), and, if the gap is worth testing, a paired test
-   across models.
-3. **LLM judge**: built (§8.3.1, `eval/judge.py`, opt-in); what remains is to
-   run it on the full run and read the "judge yes, strings no" list.
+Next: more questions per type (§10); a cross-model run on `gpt-oss-20b`,
+`gpt-oss-120b` and a local Ollama model (the harness exists, §8.4), with a
+paired test across models if the gap is worth testing; the LLM judge on `r125e`
+and `r126e`.

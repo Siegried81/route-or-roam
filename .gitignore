@@ -3,7 +3,17 @@
 .env.*
 !.env.example
 reports/
-runs/
+runs/*
+# The runs the README and docs/decisions.md cite stay in the repository, so they
+# can be recomputed (`python -m eval.report --runs runs/r126e--....jsonl`).
+!runs/r125e--groq-openai-gpt-oss-120b.jsonl
+!runs/r125e.md
+!runs/r125e_success_by_type.png
+!runs/r126e--groq-openai-gpt-oss-120b.jsonl
+!runs/r126e.md
+!runs/r126e_success_by_type.png
+!runs/r122e--groq-openai-gpt-oss-120b.jsonl
+!runs/r122e.md
 *.sqlite
 # A grounded-rag checkout downloaded by rr/checkout.py (RR_FETCH_GROUNDED_RAG=1).
 .grounded-rag/
