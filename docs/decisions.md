@@ -274,3 +274,19 @@ behind them is old.
 - **State:** nothing published changes. The ablation is not run yet (about 1M
   Groq tokens for 120 agent records). If the lead holds, the loop explains it;
   if it vanishes, retrieval depth does and the README must say so.
+
+## 2026-11-23: Runs record their code, and cost is per correct answer
+
+- **What:** every new record carries `code_sha`, `code_dirty` (`runs/` and
+  `reports/` ignored, since a run writes there), `grounded_rag_sha` (`unknown`
+  outside a git checkout) and `questions_sha256`. `eval/cost.py` gives tokens
+  and dollars per correct answer: mean tokens in plus out per record over the
+  pass rate. `eval/check_run.py` joins the repo.
+- **Why:** `r125e` and `r126e` differ by the grounded-rag commit, and nothing in
+  their files says so; the README had to. Failed runs spend tokens too, so cost
+  is read per answer that passes. Groq's list price ($0.15 in, $0.60 out per
+  million) comes from an undated page read on 2026-11-23; recheck it before
+  quoting dollars. Existing runs files are not rewritten and have no such fields.
+- **Tests:** 292 to 301 (provenance, check_run, cost). The README now opens with
+  the question, the decision rule and the cost; the run-by-run reading moved to
+  the deep dive.
