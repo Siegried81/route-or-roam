@@ -225,8 +225,8 @@ behind them is old.
   mh07, agent nu01). So chance explains most of the move, and 2 pairs can't size
   a retrieval effect. Reproduce it with `python -m eval.compare_runs
   runs/r122e--groq-openai-gpt-oss-120b.jsonl runs/r125e--groq-openai-gpt-oss-120b.jsonl
-  runs/r126e--groq-openai-gpt-oss-120b.jsonl` (`r122e` is not in the repository:
-  its file stays in the local `runs/`).
+  runs/r126e--groq-openai-gpt-oss-120b.jsonl` (`r122e`'s records and report are
+  in the repository too).
 - **README claims corrected:** cross-corpus questions are 6 of the agent's 14
   extra passes in `r125e` and 2 of 7 in `r126e`, so "most of the gap" was wrong;
   the agent answers sh10 (unanswerable) once in `r126e` (8/9); 0/6 questions are
@@ -290,3 +290,34 @@ behind them is old.
 - **Tests:** 292 to 301 (provenance, check_run, cost). The README now opens with
   the question, the decision rule and the cost; the run-by-run reading moved to
   the deep dive.
+
+## 2026-11-23: grounded-rag pin moves to 3b2de9f
+
+- **What:** the Dockerfile and CI pin grounded-rag at 3b2de9f (its `main`), up
+  from 3b09461. `r125e` (80ef892) and `r126e` (e9535b2) keep their commit, and
+  neither was run on the pin.
+- **Why:** the pin had fallen behind `main`. Between the two commits grounded-rag
+  adds a `filings_statements` corpus (Item 8 of the 10-K), which route-or-roam
+  does not list in `CORPORA`; a chunker by lines for files that start with
+  `Context:`; Azure backends; and a `.env` lookup limited to its own folder. A
+  bare `load_dotenv()` used to walk up the folder tree.
+- **Checked, no LLM call:** `data/filings_sections` and `data/ai_act_sections`
+  are byte-identical at both commits; no file of either starts with `Context:`;
+  both corpora chunk to the same 155 and 878 chunks with the same ids and text
+  (hash compared); `rag/retrieve.py` and `rag/verify.py` are untouched.
+  `python -m eval.locate_gold` finds 314 corpus files and 0 missing gold sources,
+  and the 40 questions point to 59 sources, all present.
+- **Bug fixed, `grounded_rag_sha`:** `git -C <path> rev-parse HEAD` walks up the
+  tree, so a grounded-rag folder that is not a checkout but sits inside another
+  repository (the archive RR_FETCH_GROUNDED_RAG unpacks under route-or-roam)
+  recorded route-or-roam's own commit. Now it is `unknown` unless the folder is
+  the root of a checkout. Records also carry `grounded_rag_dirty`.
+- **Docs corrected:** the 2026-11-22 entry said `r122e` is not in the
+  repository, but it is tracked; "15 answerable questions" refused were 15 records (the
+  README, deep dive section 9.1); the cross-corpus lead is 10/18 against 4/18 in
+  `r125e` but 8/18 against 6/18 in `r126e`, which the README had left out; the
+  k=10 failure of `s120b` was 7 of the agent's 8 failures, not "7 of 17"; the
+  eval doc now says to set `RR_LLM_CACHE=0` and `--models` for the published
+  file names.
+- **Tests:** 301 to 307 (grounded-rag provenance, `eval/cost.py` edge cases,
+  `check_run --provider`, `RR_MAX_SEARCH_K=0`).

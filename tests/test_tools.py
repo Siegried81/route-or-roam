@@ -183,3 +183,12 @@ def test_calculator_result_is_shown_in_full_without_e_notation(expr, shown):
     # The answer prompt calls this result "exact"; six significant digits and
     # e-notation are neither exact nor a format the answer should copy.
     assert run_tool("calculate", {"expression": expr}, []).output == f"{expr} = {shown}"
+
+
+def test_search_cap_below_one_is_refused_at_start(monkeypatch):
+    """RR_MAX_SEARCH_K=0 would make every search return nothing, so settings.py rejects it."""
+    monkeypatch.setenv("RR_MAX_SEARCH_K", "0")
+    spec = importlib.util.spec_from_file_location("settings_zero", settings.__file__)
+    module = importlib.util.module_from_spec(spec)
+    with pytest.raises(ValueError, match="RR_MAX_SEARCH_K"):
+        spec.loader.exec_module(module)
