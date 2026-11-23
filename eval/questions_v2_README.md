@@ -37,3 +37,7 @@ python -m eval.compare_runs runs/a.jsonl runs/b.jsonl --questions eval/questions
 `RR_QUESTIONS=eval/questions_v2.jsonl` does the same for every tool; `--questions` wins over it. For
 the 100-question set, `cat eval/questions.jsonl eval/questions_v2.jsonl > eval/questions_all.jsonl`
 and pass that file. Each record's `questions_sha256` is the hash of the file actually read.
+
+`eval/questions_all.jsonl` is `questions.jsonl` followed by `questions_v2.jsonl`
+(100 questions, ids unique). Rebuild it with
+`cat eval/questions.jsonl eval/questions_v2.jsonl > eval/questions_all.jsonl`.
