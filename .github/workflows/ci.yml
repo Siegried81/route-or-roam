@@ -24,7 +24,7 @@ env:
   # `python -m eval.locate_gold`, relabel what it reports, then change the sha.
   # The Dockerfile's default ARG is the same commit (tests/test_deploy_config.py
   # checks it), so the docker job and Render build what the tests ran against.
-  GROUNDED_RAG_REF: 2fad55f78e48c5462769daa161ceaf197034b92b
+  GROUNDED_RAG_REF: 3b09461aa26b86ec0b0e7e184b2fe2b705d616b6
 
 # A new push to the same branch cancels the run still going for the old commit.
 concurrency:

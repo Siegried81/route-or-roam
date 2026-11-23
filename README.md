@@ -107,7 +107,7 @@ which don't rank for queries like "Article 50 effective date" (sh09, cc06,
 cc02, mh07). For nu05, the DMA fine limit is in Apple's 10-K, but the workflow
 looked for it in the AI Act. So the refusal is honest and the search is what
 failed. With the older retrieval (`r126e`) it still refuses 15 answerable
-questions, on a different set, 12 of them with no gold source retrieved.
+questions, on a different set, 12 of them missing a gold source the answer needed.
 
 **Unanswerable questions.** Both systems answered "not in the documents"
 correctly on all 9 runs in `r125e`. In `r126e` the workflow still does (9/9),
@@ -244,12 +244,12 @@ its own file (no cross-model run has been made yet).
   chunk (Article 113) holds the AI Act's application dates and rarely ranks.
   Both systems share grounded-rag's retrieval, so this caps both. With the
   older retrieval (`r126e` on e9535b2) the workflow still refuses 15 answerable
-  questions, on a different set, 12 of them with no gold source retrieved.
+  questions, on a different set, 12 of them missing a gold source the answer needed.
 - `r125e` ran on grounded-rag 80ef892, `r126e` on e9535b2, `r123e` on 2fad55f;
-  `r122e` and earlier ran on e9535b2 or older. CI and the image pin 2fad55f;
-  2fad55f to 80ef892 changes grounded-rag's NLI loader, its API, UIs and docs,
-  and neither its retrieval nor its verifier, so `r125e` is what the pinned
-  code gives. Runs before `r125e` also predate the 16 November figure-check
+  `r122e` and earlier ran on e9535b2 or older. Since 23 November CI and the
+  image pin grounded-rag 3b09461, whose verifier reads "n't" negations and
+  thousands separators more strictly; retrieval is the same as in `r125e`.
+  New runs use that commit. Runs before `r125e` also predate the 16 November figure-check
   fix, and runs before `r122e` the 6 November fixes (`docs/decisions.md`), so
   their numbers aren't directly comparable.
 - The raw records and reports of `r125e` and `r126e` are in `runs/`.

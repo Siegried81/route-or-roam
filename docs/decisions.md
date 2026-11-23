@@ -232,11 +232,8 @@ behind them is old.
   the agent answers sh10 (unanswerable) once in `r126e` (8/9); 0/6 questions are
   4 in `r125e` and 7 in `r126e` (cc03, cc05, in03 added); with the old retrieval
   the workflow still refuses 15 answerable questions, on another set, 12 of
-  them with no gold source retrieved (replay not redone here, figure from the
-  audit); the budget message ended 8 agent runs (12 in `r126e`).
-- **Pin:** `r125e` ran on 80ef892 while CI pins 2fad55f. Between them only
-  grounded-rag's NLI loader, API, UIs and docs change, not retrieval or the
-  verifier, and route-or-roam does not use `rag/nli.py`.
+  them missing a gold source the answer needed (replayed on 23 November, see
+  below); the budget message ended 8 agent runs (12 in `r126e`).
 
 ## 2026-11-22: Docs cut down, runs made traceable
 
@@ -250,3 +247,17 @@ behind them is old.
 - **Tests:** 287 to 291: the agent's call to `check_answer` (question and tool
   calls) is pinned, and so is the private `rag.verify._numbers` that
   `rr/grounded.py` imports; `eval/compare_runs.py` has two offline tests.
+
+## 2026-11-23: grounded-rag pin moves to 3b09461
+
+- **What:** the Dockerfile and CI pin grounded-rag at 3b09461 (its `main` after
+  the 22 November audit), up from 2fad55f. Published runs keep their commit:
+  `r125e` on 80ef892, `r126e` on e9535b2. New runs use 3b09461.
+- **Why:** the pin had fallen behind grounded-rag's fixes. Retrieval is the same
+  as 80ef892 and the system prompt is unchanged; the verifier now reads "n't"
+  negations and thousands separators correctly, which can change which figures
+  `check_answer` flags. route-or-roam passes its own grounding bar, so
+  grounded-rag's new default (0.30) does not apply.
+- **Replay of the workflow's false refusals,** same index, recorded queries:
+  `r126e` on e9535b2, 12 of 15 miss a gold source the answer needed (only sh08
+  got none at all); `r125e` on 80ef892, 14 of 15. No LLM call.
