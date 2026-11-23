@@ -353,8 +353,8 @@ metric. A report is rebuilt with `python -m eval.report --runs <records>
   for sh09, cc06, cc02 and mh07, and nu05, whose DMA fine limit is in Apple's
   10-K while the workflow searched the AI Act. In `r126e` the refused set is
   different (sh09, mh02, nu05, cc05 twice each; mh10, cc06, sh08, mh04, cc02,
-  cc03, cc04 once) and 12 of 15 again have no gold source retrieved (replay done
-  for the audit, not redone here). Those refusals measure retrieval, not the
+  cc03, cc04 once) and 12 of 15 again miss a gold source the answer needed (replayed
+  on 23 November against e9535b2 with the same index; only sh08 got none). Those refusals measure retrieval, not the
   model's caution.
 - **Questions nobody passes** (none of the 6 runs of a question): mh08, nu05,
   cc02, un03 in `r125e`; those plus cc03, cc05, in03 in `r126e`.
@@ -388,9 +388,11 @@ python -m eval.compare_runs runs/r122e--groq-openai-gpt-oss-120b.jsonl \
     runs/r125e--groq-openai-gpt-oss-120b.jsonl runs/r126e--groq-openai-gpt-oss-120b.jsonl
 ```
 
-`r125e` ran on 80ef892 and CI pins 2fad55f. Between them grounded-rag changed
-its NLI loader, API, UIs and docs; retrieval and verifier are untouched, and
-route-or-roam does not import `rag/nli.py`.
+`r125e` ran on 80ef892, `r126e` on e9535b2. CI and the image pin 3b09461 since
+23 November: same retrieval as 80ef892, a verifier that reads "n't" negations and
+thousands separators more strictly, and a system prompt that is unchanged.
+route-or-roam passes its own grounding bar, so grounded-rag's new default (0.30)
+does not apply to it.
 
 ### 9.4 Earlier runs
 
