@@ -59,11 +59,11 @@ def nearly_exhausted(budget: dict) -> bool:
 
     That is the case with one step left, with 80% of the tokens used, or when
     the predicted next call would reach the token cap. The agent's prompt grows
-    with every search (a k=8 search adds 1 to 4k tokens), so the next call is
+    with every search (a k=8 search adds about 850 tokens), so the next call is
     predicted as the last one plus the growth seen between the last two:
     calls of 1,000, 2,500 and 4,000 tokens predict 5,500. Assuming "no larger
-    than the last" let 8 agent runs of 8 November reach 12,100 tokens after 4
-    calls and stop on the budget message without their tool-less last call.
+    than the last" let 8 agent runs of 8 November pass the token cap after 4 or
+    5 calls, 5 of them on the budget message without their tool-less last call.
     Calls that stop growing are not extrapolated upwards.
 
     Only meaningful while `exhausted` is still None. A loop-shaped system uses it

@@ -150,6 +150,23 @@ def test_report_degrades_without_matplotlib(tmp_path, monkeypatch):
     assert "Chart skipped" in out.read_text(encoding="utf-8")
 
 
+def test_a_local_report_does_not_overwrite_the_published_chart(tmp_path):
+    # `--out runs/r1.md` used to write docs/success_by_type.png, the chart the
+    # README shows, and the link in runs/r1.md then pointed at nothing.
+    assert report.default_png(Path("docs/results.md")) == Path("docs/success_by_type.png")
+    assert report.default_png(Path("runs/r1.md")) == Path("runs/r1_success_by_type.png")
+    pytest.importorskip("matplotlib")
+    runs, qfile = _write_inputs(tmp_path)
+    published = tmp_path / "docs" / "success_by_type.png"
+    published.parent.mkdir()
+    published.write_bytes(b"published")
+    out = tmp_path / "runs" / "r1.md"
+    report.main(["--runs", str(runs), "--questions", str(qfile), "--out", str(out)])
+    assert published.read_bytes() == b"published"
+    assert (tmp_path / "runs" / "r1_success_by_type.png").exists()
+    assert "](r1_success_by_type.png)" in out.read_text(encoding="utf-8")
+
+
 def test_png_written_when_matplotlib_available(tmp_path):
     pytest.importorskip("matplotlib")
     runs, qfile = _write_inputs(tmp_path)

@@ -1,305 +1,276 @@
 # Decisions
 
-One dated entry per change that alters what the system promises. Append, never rewrite.
+One entry per decision that still holds: date, what, why, in a few lines. An
+entry that replaces an earlier one is merged into it, with the earlier date in
+a few words. Entries that explain what a number means stay, even when the run
+behind them is old.
 
-## 2026-10-10 — Approving over the API needs an identity
+## 2026-10-10: Approving over the API needs an identity
 
 - **What:** `POST /api/approve` checks who calls it. With `RR_APPROVE_TOKEN`
-  unset, only requests from this machine may approve (403 otherwise); with it
-  set, the `X-Approve-Token` header must match it, compared in constant time
-  (401 otherwise). The response carries `decided_by`. The three other routes
-  are unchanged: they read, approving writes.
-- **Why:** the human gate is the agent's one irreversible action, and the API
-  accepted the decision from anyone who could reach the port. On localhost
-  that is the owner; started with `--host 0.0.0.0`, it was anyone on the
-  network, writing a report in the owner's name.
-- **What it does not settle:** a token is one shared secret, not a user. If
-  the API is ever exposed to several people, replace it with a session and a
-  name in `decided_by`.
-- **Revisit if:** the React UI is deployed off-box — it then has to send the
-  header (`web/src/AskTab.jsx`, the `api("/api/approve", …)` call).
+  unset only this machine may approve (403 otherwise); set, the
+  `X-Approve-Token` header must match, compared in constant time (401). The
+  response carries `decided_by`. The three other routes only read.
+- **Why:** approving is the agent's one irreversible action, and with
+  `--host 0.0.0.0` anyone on the network could write a report in the owner's
+  name. A token is one shared secret, not a user: with several users, replace
+  it with a session. A UI deployed off-box must send the header
+  (`web/src/AskTab.jsx`).
 
-## 2026-10-10 — Deployable as one Docker image, grounded-rag cloned inside
+## 2026-10-10: One Docker image, grounded-rag cloned inside
 
-- **What:** `Dockerfile` (Node stage for the UI, Python runtime with grounded-rag
-  cloned at a pinned ref into `/opt/grounded-rag`), `docker/entrypoint.sh`
-  (optional index build at start, uvicorn on `$PORT`), `docker-compose.yml`
-  (API, one-shot `ingest`, bundled Ollama, `rag_index` volume), `render.yaml`
-  (hosted embedder, indexes rebuilt on each start). The UI sends
-  `X-Approve-Token` from a field that appears only once the server asks for it.
+- **What:** `Dockerfile` (Node stage for the UI, Python runtime with
+  grounded-rag cloned at a pinned ref), `docker/entrypoint.sh` (optional index
+  build at start, uvicorn on `$PORT`), `docker-compose.yml`, `render.yaml`.
 - **Why:** route-or-roam reaches grounded-rag through `sys.path` and uses its
-  corpora and indexes, so "install the package" is not a deployment; a checkout
-  at a known ref is. Without the header the identity check added the same day
-  would have locked the deployed UI out of approving.
-- **What it does not settle:** the Render blueprint is written from the
-  platform's documented behaviour, not from a deploy; the first deploy is the
-  test. Rebuilding indexes on every start costs embedding calls each deploy,
-  acceptable for two small corpora, not for a large one.
-- **Revisit if:** grounded-rag gains a `pyproject.toml` and ships its corpora
-  as package data — the clone then becomes a pip install at a version.
+  corpora and indexes, so a checkout at a known ref is the deployment, not a pip
+  install. The Render blueprint is written from the platform's docs, not from a
+  deploy: the first deploy is its test. Rebuilding the indexes on every start
+  costs embedding calls, fine for two small corpora.
 
-## 2026-10-11 — Eval set relabelled against the full AI Act
+## 2026-10-11: Eval set relabelled against the full AI Act
 
 - **What:** grounded-rag replaced its four-file French AI Act primer with the
-  full Regulation (EU) 2024/1689 in English (309 files: recitals, articles,
-  annexes). The 15 questions that touch the AI Act were relabelled against it
-  (`eval/questions.jsonl`):
-  - label only, same expected answer: sh07, sh09, mh07, cc01, cc03, cc04, cc06;
-  - Annex III date, mh08, cc02, in03: 2 December 2027 becomes **2 August 2026**.
-    The later date came from the proposed Digital Omnibus, which is not in the
-    corpus; the regulation applies from 2 August 2026 and defers only Article
-    6(1) to 2 August 2027. mh08 also drops "explainability", named only in a
-    recital;
-  - sh10 (why the Annex III obligations were postponed) is now **unanswerable**:
-    nothing in the regulation mentions a postponement;
-  - mh09 and cc05 lose their "16 months" half and ask instead for the date the
-    GPAI obligations apply (2 August 2025) and the date prohibited practices
-    were banned (2 February 2025);
-  - sh08 asks for the two most tightly regulated categories (prohibited,
-    high-risk): "limited" and "minimal risk" are commentary, not the text;
-  - un03 (maximum fine) is now **answerable**: Article 99 gives EUR 35 000 000
-    or 7 % of turnover, so its forbidden strings are gone.
-  Type counts are unchanged (sh10 and un03 swap single_hop and unanswerable).
-- **Why:** every AI Act gold source pointed at a file that no longer exists,
-  so source recall read 0 and `test_string_facts_appear_in_gold_sources`
-  failed against grounded-rag main. Keeping the old labels would have scored
-  correct answers from the real regulation as wrong.
-- **What it changes in the numbers:** pass rates, source recall and refusal
-  counts measured before this date are **not comparable** with runs after it
-  (`docs/results.md` predates it). The questions are still asked in French
-  against an English corpus for the AI Act part.
-- **How to catch the next drift:** `python -m eval.locate_gold` lists every
-  gold source missing from the grounded-rag checkout and where its facts now
-  live; it exits 1 while any is missing. It reports, it never relabels.
+  full Regulation (EU) 2024/1689 in English (recitals, articles, annexes). The
+  15 questions on the AI Act were relabelled in `eval/questions.jsonl`. Label
+  only: sh07, sh09, mh07, cc01, cc03, cc04, cc06. Annex III date (mh08, cc02,
+  in03): 2 December 2027 becomes **2 August 2026**, since the later date came
+  from the proposed Digital Omnibus, which is not in the corpus. sh10 (why
+  Annex III was postponed) is now **unanswerable**; un03 (maximum fine) is now
+  **answerable** (Article 99: EUR 35 000 000 or 7 %). mh09 and cc05 ask for the
+  date GPAI obligations apply (2 August 2025) and prohibited practices were
+  banned (2 February 2025); sh08 asks for the prohibited and high-risk
+  categories; mh08 drops "explainability" (a recital only).
+- **Why:** every AI Act gold source pointed at a file that no longer exists, so
+  source recall read 0 and correct answers would have scored as wrong.
+- **Numbers:** pass rates, source recall and refusal counts from before this
+  date are **not comparable** with later runs. `python -m eval.locate_gold`
+  lists every gold source missing from the grounded-rag checkout and where its
+  facts now live (exit 1 while any is missing); it reports, never relabels.
 
-## 2026-10-12 — An opt-in LLM judge, reported next to the string score
+## 2026-10-12: An opt-in LLM judge, next to the string score
 
-- **What:** `eval/judge.py` makes one structured LLM call per stored record
-  (fixed rubric, reply validated against a pydantic schema, no second call on
-  an invalid reply) and writes the verdicts to their own jsonl.
-  `eval.report --judge <file>` adds secondary rows: "success with judged
-  facts" and the records where judge and strings disagree on the facts.
-- **New number, not a changed one:** "success with judged facts" is success as
-  defined in `eval/score.py` with criterion 1 (key facts) decided by the judge
-  instead of string matching; citations, refusal, forbidden strings and errors
-  are unchanged. The reference success rate, every existing row and every
-  published figure stay as they are: without `--judge` the report is
-  byte-identical (checked on the five stored runs files).
+- **What:** `eval/judge.py` makes one structured call per stored record and
+  writes verdicts to their own jsonl. `eval.report --judge` adds rows
+  ("success with judged facts", and where judge and strings disagree).
 - **Why:** string matching rejects answers that are right in other words
-  (`missed_hop`); a judge lists them without making the reference score depend
-  on a model.
-- **What it does not settle:** the judge is itself a model and has not been run
-  on the published records, so its agreement with a human reader is unmeasured.
-- **Revisit if:** the judge is run on the full set; read the "judge yes,
-  strings no" list by eye before quoting the judged rate.
+  (`missed_hop`). The judge lists them without making the reference score depend
+  on a model: without `--judge` the report is byte-identical, and "success" is
+  still `eval/score.py`.
+- **Open:** the judge has not been run on the published records, so its
+  agreement with a human reader is unmeasured. Read the "judge yes, strings no"
+  list by eye before quoting a judged rate.
 
-## 2026-10-13 — The fence catches spaced and fullwidth tags
+## 2026-10-13: The fence catches spaced, fullwidth and zero-width tags
 
 - **What:** `rr/fence.py` matches `<untrusted_source` look-alikes on an NFKC
-  copy of the passage, with whitespace allowed around the slash, and escapes
-  only the matched spans; the source name is attribute-escaped. `scan()` runs
-  on the NFKC form too.
-- **Why:** `< /untrusted_source>` and the fullwidth `＜/untrusted_source＞`
-  passed through unescaped, so a retrieved passage could close its own fence,
-  and a source name holding a quote could add attributes to the tag
-  (`source="evil.md" trusted="yes"`). Same fix as grounded-rag's and
-  flood-policy-kit's fences.
-- **Measurement change:** `injection_flags` now also counts passages that use
-  those spellings, so it can only go up on the same corpus; runs from before
-  this date are not strictly comparable on that column.
+  copy of the passage, with whitespace allowed around the slash, after removing
+  zero-width spaces, soft hyphens and word joiners (added 2026-11-06). It
+  escapes only the matched spans, and the source name is attribute-escaped.
+- **Why:** `< /untrusted_source>`, the fullwidth form and a zero-width space
+  inside the tag let a passage close its own fence, and a source name with a
+  quote could add attributes to the tag. Same fix as grounded-rag's.
+- **Numbers:** `injection_flags` also counts these spellings, so it can only go
+  up on the same corpus; runs from before are not strictly comparable on it.
 
-## 2026-10-14 — Results re-run on the full 40-question set, cache off
+## 2026-11-06: Scoring and refusal rules
 
-- **What:** `python -m eval.run_compare --run-id r120e --models
-  openai/gpt-oss-120b --repeats 1` with `RR_LLM_CACHE=0`, then `eval.report`.
-  The README table and `docs/results.md` now report this run.
-- **Why:** the published 17-question results were labelled against a corpus that
-  no longer exists and predated the agent's last-call step and refusal rule.
-  The cache was turned off so no stored answer was replayed.
-- **What changes in the numbers:** workflow 15/17 -> 28/40, agent 15/17 ->
-  29/40; McNemar p = 1.000 in both. The agent spends 2.9x the input tokens and
-  hits its budget on 10% of questions; four agent answers were lost to provider
-  errors (two unparsable outputs, one tool call with tools disabled, one 413
-  over the 8,000 TPM free-tier limit) and are scored as failures.
-
-## 2026-11-06: Audit fixes, and three labels accept their French forms
-
-- **Labels (`eval/questions.jsonl`, mirrored in `eval/paraphrases.jsonl`):**
-  sh08 accepts "interdits/interdite/prohibé(e)(s)", mh07 accepts
-  "subliminale(s)/subliminaux", mh09 accepts "fournisseur" (singular). These
-  questions are asked in French, and a right answer written in French failed
-  only because its inflection was missing from the alias list.
-  - **What changes in the numbers:** the 14 October records, re-scored with no
-    new LLM call, go from workflow 28/40 to 30/40 (mh07 and mh09: both answers
-    are correct, read by eye). The agent stays at 29/40. No record changed
-    from pass to fail. Paired: 5 workflow-only, 4 agent-only, McNemar p =
-    1.000. README and `docs/results.md` report the re-scored figures.
+- **Labels:** sh08 accepts "interdits/interdite/prohibé(e)(s)", mh07
+  "subliminale(s)/subliminaux", mh09 "fournisseur". The questions are in French
+  and a right answer failed for a missing inflection. Re-scoring the 14 October
+  records (no LLM call): workflow 28/40 to 30/40, agent 29/40, no record went
+  from pass to fail.
 - **Refusal (`rr/common.py::is_refusal`):** an answer is a refusal only when it
-  is the refusal sentence and nothing else. Before, any answer that *contained*
-  the sentence and cited nothing counted, so "Revenue was 416 billion. I
-  couldn't find anything..." passed an unanswerable question. Curly
-  apostrophes are now folded first. Measured on the 254 stored records: no
-  `refused` value would change (every recorded refusal is the bare sentence).
-- **Last call (`rr/budget.py::nearly_exhausted`):** also true when one more
-  call as large as the previous one would reach the token cap. The agent's
-  prompt grows by 3 to 4k tokens per search, so it could jump past 100% from
-  under 80% and stop on `max_tokens` with the budget message. That is what
-  happened to agent cc06, in03 and mh08 on 14 October (its three
-  `loop_or_budget` failures). It changes what `budget_exhausted` means for the
-  agent: future runs should show fewer budget stops and more last-call answers
-  or refusals. The workflow is unaffected (it never reaches 80%).
-- **Groq `output_parse_failed` (`rr/llm.py`):** retried once with a format
-  reminder, like the three other model-caused 400s. It cost agent mh07 and
-  mh09 on 14 October.
-- **Rate limits (`eval/run_compare.py`):** a record whose error is a
-  `TransientLLMError` (a 429, 5xx or network failure that outlasted the
-  backoff) goes to the dead letter and is retried on resume, instead of being
-  scored as the system's failure. live1.jsonl held 27 agent and 23 workflow
-  such records. It changes what an `error` record means: from now on it is a
-  model or request failure, never a quota.
-- **Fence (`rr/fence.py`):** zero-width spaces, soft hyphens and word joiners
-  are removed before tag and marker detection, so `<\u200b/untrusted_source>`
-  no longer closes the fence unseen. `injection_flags` can only go up.
-- **Results API (`api/results.py`):** `*.judge.jsonl` and `dead_letter.jsonl`
-  are no longer listed or scored as runs.
-- **Not changed, open questions:** the workflow's `k=4` against the agent's
-  self-chosen `k` up to 8, the single calculator expression, and McNemar
-  pairing on (question, repeat) when repeats are cached replays. Each changes
-  the comparison itself, so each is a design decision, not a fix.
+  is the refusal sentence and nothing else (curly apostrophes folded first).
+  Before, "Revenue was 416 billion. I couldn't find anything..." passed an
+  unanswerable question. On the 254 stored records no `refused` value changed.
+- **McNemar (`eval/report.py`):** pairs are questions (strict majority over
+  repeats), not (question, repeat). With the cache on, repeats are replays and
+  the old pairing made p far too small (5 discordant questions over 3 repeats:
+  6e-5 instead of 0.0625).
+- **Rate limits (`eval/run_compare.py`):** a `TransientLLMError` (a 429, 5xx or
+  network failure that outlasted the backoff) goes to the dead letter and is
+  retried on resume. An `error` record now means a model or request failure,
+  never a quota (live1.jsonl held 27 agent and 23 workflow such records).
+- **Groq `output_parse_failed`:** retried once with a format reminder, like the
+  three other model-caused 400s. It cost agent mh07 and mh09 on 14 October.
 
-## 2026-11-06: Design changes from the audit (plan, calculator, last call, pairing, guards)
+## 2026-11-06: Design changes (plan, calculator, last call, search depth, guards)
 
-- **Workflow plan:** each search names its own corpus (1 to 4 searches)
-  instead of every query going to every corpus. Queries are written in
-  English in both systems (`QUERY_LANGUAGE_RULE`); the agent's prompt still
-  said "search the French corpus in French", left over from the French primer
-  replaced on 2026-10-11.
-- **Calculator:** the workflow asks for 1 to 3 expressions in its one calc
-  call, and the shared calculator gains `days_between` for ISO dates. Both
-  systems get the date function, so it does not favour one.
+- **Workflow plan:** each search names its own corpus, 2 to 4 searches
+  (`MIN_SEARCHES = 2`, set on 8 November: with a minimum of 1, 26 of 40
+  questions got one search, source recall fell from 0.85 to 0.73 and the
+  workflow refused 8 answerable questions, 27/40; with 2 the mean is 3.83
+  searches, recall 0.83, 30/40). Queries are written in English in both systems.
+- **Calculator:** the workflow asks for 1 to 3 expressions; both systems get
+  `days_between` for ISO dates. Results print in full (whole numbers) or with 12
+  significant digits, not `:g` (`416161 * 3 = 1.24848e+06` sat next to a prompt
+  calling them exact).
 - **Agent last call:** built from the fenced passages, the calculator results
-  and the question, like the workflow's answer step, instead of the tool-call
-  conversation sent without tools (gpt-oss called a tool anyway and Groq
-  rejected the request twice, agent cc03).
-- **Retrieval depth, not equalised:** the workflow keeps k=4, the agent picks
-  up to 8 (it chose 8 on 68 of 87 searches). At k=8 the workflow's 4 searches
-  would overrun the 12k-token budget and Groq's 8k-token request limit.
-  `RR_WORKFLOW_SEARCH_K` lets a run test it. The difference is now stated in
-  the deep dive instead of being hidden behind "same tools".
-- **McNemar:** pairs are questions (strict majority over repeats), not
-  (question, repeat). With the LLM cache on, repeats are replays and the old
-  pairing made p-values far too small (5 discordant questions over 3 repeats:
-  p = 6e-5 instead of 0.0625). On the published one-repeat run nothing
-  changes but the sentence.
-- **What changes in the numbers:** the plan, calculator, prompt and last-call
-  changes alter both systems' behaviour, so runs before this date are not
-  comparable with runs after it. The published figures are still the
-  14 October records; a new run is needed to measure the effect.
+  that ran (a rejected call is left out) and the question, like the workflow's
+  answer step. `nearly_exhausted` is true with one step left, at 80% of the
+  tokens, or when one more call as big as the last, plus the growth seen between
+  the last two, would reach the cap. The agent's prompt grows by about 850
+  tokens per k=8 search (fit on 98 agent runs of r120e to r123e, 95% bootstrap
+  interval 730 to 960). Before this guard, 8 runs of `r121e` went past the cap
+  (12,100 to 16,139 tokens after 4 or 5 calls), 5 of them with no answer.
+- **Search depth, not equalised:** the workflow keeps k=4, the agent picks up to
+  8 (it asked for 10, capped to 8 in code, on 68 of 87 searches).
+  `RR_WORKFLOW_SEARCH_K` lets a run test it; at k=8 the workflow's searches
+  would overrun the 12k budget and Groq's 8k request limit.
 - **API guards:** `RR_API_KEY` and `RR_RATE_LIMIT_PER_MINUTE` protect
-  `/api/ask`, both off by default; `render.yaml` sets the rate limit to 6.
-- **Stack:** the Dockerfile builds grounded-rag at the same pinned commit as
-  CI (68b8b93, checked by a test; `eval.locate_gold` reports nothing missing),
-  instead of `main`. The image installs `requirements.lock` (Python 3.12,
-  Linux), test tools moved to `requirements-dev.txt`, `npm ci` no longer falls
-  back to `npm install`, CI builds the UI on Node 26 like the image, Actions
-  are pinned to SHAs, CI runs on pushes to main and on PRs (not twice per PR
-  push), the compose Ollama image is pinned, and Dependabot may now propose
-  Python 3.13 and 3.14 base images (only 3.15 lacks a zstandard wheel).
+  `/api/ask`, both off by default; `render.yaml` sets the limit to 6.
+- **Numbers:** these change both systems' behaviour, so runs before `r122e`
+  are not comparable with it (it also has grounded-rag's #34: a citation after
+  the full stop cites the sentence before it).
 
+## 2026-11-08: Report rules for stored runs
 
-## 2026-11-08: grounded-rag pin moved to e378805
+- **Rate-limit errors left out (`eval/report.py`, `api/results.py`):**
+  `live1.jsonl` and `live2.jsonl` hold 50 and 7 `TransientLLMError` records.
+  They are counted in `infra_errors` and left out of every rate: live1 goes
+  from 2/32 for both systems to workflow 2/9 and agent 2/5.
+- **Cached repeats:** repeats after the first replay it, so their spread is
+  zero by construction. It prints as n/a, and the Wilson interval counts
+  questions (majority over repeats) instead of records: for 40 questions at 75%
+  it widens from 67-82% to 60-86%. Cache-off runs are unchanged.
+- **Loop stops** are tagged `loop_or_budget` (records carry `stop_reason`);
+  pass/fail is unchanged.
+- **Judge `--estimate`** no longer counts errored records as pending calls.
 
-- **What:** `GROUNDED_RAG_REF` in the Dockerfile and in `.github/workflows/ci.yml`
-  goes from 68b8b93 to e378805, grounded-rag's main after #33.
-- **Why:** grounded-rag's main history was rewritten on 8 November to drop
-  commit trailers. The code is identical (68b8b93 and its rewrite 63918be have
-  the same tree), but 68b8b93 is no longer on any branch, so CI and the image
-  build would fail once GitHub prunes it. Moving to e378805 also brings #33:
-  "(S9)" counts as a citation.
-- **What changes in the numbers:** citation counts can only go up (one stored
-  agent answer, sh08, cites in parentheses). `eval.locate_gold` reports nothing
-  missing at e378805; 262 tests pass against it.
+## 2026-11-16: grounded-rag pin is 2fad55f
 
-## 2026-11-08: Second audit, six live fixes
+- **What:** the Dockerfile and CI pin grounded-rag at 2fad55f, up from 68b8b93
+  (6 November), e378805 and e9535b2 (8 November). `eval.locate_gold` finds every
+  gold source at the pin (314 corpus files, 0 missing).
+- **Why:** grounded-rag's main history was rewritten on 8 November, and the
+  old pin is on no branch any more, so CI and the build would fail once GitHub
+  prunes it. A pin also keeps an upstream corpus change from turning CI red on
+  its own. To bump: check out the new commit, run `eval.locate_gold`, relabel,
+  change both shas (a test checks they agree).
+- **Retrieval at 2fad55f:** hybrid retrieval changed in 43cde89 (a BM25-only
+  passage carries its dense cosine; MMR's relevance is the fused rank). The
+  source files a workflow search returns differ in 32 of 40 records between
+  e9535b2 and 2fad55f, but replaying the same recorded queries moves source
+  recall by at most 0.01. The workflow's recall drop (0.83 to 0.80) came from
+  the planner writing other queries. `r126e` (2026-11-22) later tested this
+  with LLM runs.
+- **Interval:** `eval/report.py` computes the Wilson interval over all records
+  when the cache is off. Three repeats of 40 questions are not 120 independent
+  draws, so the README also gives it on the 40 questions. Whether the report
+  should count questions is open.
 
-- **Stored rate-limit errors are left out (`eval/report.py`, `api/results.py`):**
-  `run_compare` stopped writing `TransientLLMError` records on 6 November, but
-  `live1.jsonl` and `live2.jsonl` still hold 50 and 7 of them, and the report
-  and the Results tab scored each as a failure. They are now counted in
-  `infra_errors`, left out of every rate and average, and the count is printed.
-  - **What changes in the numbers:** live1 goes from workflow 2/32 and agent
-    2/32 (6.2% each) to 2/9 and 2/5; its average LLM calls stop counting
-    zero-call quota records. The published `r120e` report is byte-identical.
-- **Cached repeats (`eval/report.py`):** with the LLM cache on, repeat 1 and
-  later replay repeat 0, so the spread across repeats was 0.0 by construction
-  and printed as "± 0.0". It is now n/a, with a note, and the Wilson interval
-  counts questions (strict majority over repeats, as McNemar already does)
-  instead of records. For 40 questions × 3 cached repeats at 75% the interval
-  widens from 67-82% to 60-86%. Cache-off runs and one-repeat runs are unchanged.
-- **Loop stops are tagged `loop_or_budget` (`rr/common.py`, `eval/score.py`):**
-  a run the guard ends for repeating a call has `budget_exhausted` false, so it
-  fell through to `missed_hop` or `uncited`. Records now carry `stop_reason`,
-  and the tag also applies when it is `loop`. Pass/fail is unchanged; only the
-  failure tag moves. No stored record has a loop stop.
-- **Judge estimate (`eval/judge.py`):** errored records were listed as pending,
-  so `--estimate` counted them as LLM calls (80 instead of 76 on `r120e`,
-  64 instead of 10 on `live1`) and every resume logged them as judge errors
-  again. They are no longer pending. Verdicts and judged rates are unchanged.
-- **Calculator output (`rr/tools.py::format_result`):** results were printed
-  with `:g`, six significant digits with e-notation from a million up
-  (`416161 * 3 = 1.24848e+06`), next to a prompt calling them exact. Whole
-  numbers are now printed in full and fractions with 12 significant digits.
-  This changes the prompts of calculator questions, so cached replies for
-  them no longer match; no stored record held a value over a million.
-- **Agent last call (`rr/agent.py`):** a calculate call rejected for invalid
-  arguments was handed to the last call as "Calculator result (exact): Invalid
-  arguments: ...". Only calls that ran are passed on now.
+## 2026-11-16: Calculator results and the question's own numbers pass the figure check
 
-## 2026-11-08: Two regressions from 2026-11-06 found by a re-run and fixed; results re-run
+- **What:** `rr/common.py::check_answer` runs grounded-rag's verifier, then
+  accepts two kinds of figure its figure check rejects: the result of a
+  calculation that ran (`calculator_values`, matched at the precision the answer
+  writes it, a one-digit figure only when equal) and a number the question
+  gives (`grounded.figures_in`). Any other figure absent from the cited source
+  still fails; the rejected ones are in `verify["unsupported_numbers"]` and the
+  retry message names them. Both systems pass it the question and their
+  tool calls (pinned in `tests/test_derived_figures.py`).
+- **Why:** grounded-rag has no calculator, so a correct total is "invented" to
+  it. On the agent's stored `r123e` states, 35 of 48 retried first answers
+  failed on a figure: 19 were calculator results, 6 came from the question.
+  The old retry message offered the refusal sentence and the workflow sometimes
+  took it (nu05, nu08, cc06).
+- **Checked:** on the same 48 answers, with no LLM call, the rule clears 18 of
+  the 35 and 15 pass on the first try (0 before). What still fails is
+  arithmetic done without the calculator and identifiers the passage doesn't
+  repeat ("10-K").
+- **Numbers:** both systems now verify numeric and cross-corpus answers
+  differently, so runs before this entry are not comparable with `r124e` on.
+  `eval.report --out runs/x.md` now writes its chart next to the report; it used
+  to overwrite `docs/success_by_type.png`.
 
-- **What:** grounded-rag is pinned to e9535b2 (its main after #34) in the
-  Dockerfile and CI. The first run on it, `r121e`, showed two regressions
-  from the 6 November design changes, both fixed and measured again in
-  `r122e`, which the README and `docs/results.md` now report.
-- **Workflow plan:** with a minimum of 1 search, the paired plan asked for a
-  single search on 26 of 40 questions (mean 1.35 searches against 2.12 on
-  14 October). Source recall fell from 0.85 to 0.73 and the workflow refused
-  8 answerable questions (27/40). `MIN_SEARCHES = 2` and a prompt that asks
-  for one search per part of the question bring it back to a mean of 3.83
-  searches, recall 0.83, 2 false refusals, 30/40.
-- **Agent budget:** `nearly_exhausted` assumed the next call no larger than
-  the last; agent calls grow by about 1k tokens per k=10 search, so 8 runs in
-  `r121e` reached ~12,100 tokens after 4 calls and stopped on the budget
-  message. It now adds the growth seen between the last two calls. In
-  `r122e` one run stops that way (cc02); three more hit the budget during the
-  verification retry, after a checked answer that is kept.
-- **What changes in the numbers:** `r122e` gives workflow 30/40, agent 30/40,
-  both pass 28, McNemar p = 1.000. The workflow now spends 4,094 input tokens
-  a question (2,841 on 14 October) because it searches more. Runs before this
-  date are not comparable with `r122e`: the plan, the budget guard and
-  grounded-rag's verifier (#34, a citation after the full stop now cites the
-  sentence before it) all changed.
+## 2026-11-20: Results are `r125e`, run on one machine
 
-## 2026-11-20: Search depth cap made configurable for a k=4 agent ablation
+- **What:** the README, `docs/results.md` and the deep dive report `r125e`: 40
+  questions × 2 systems × 3 repeats, `openai/gpt-oss-120b` on Groq, cache off,
+  grounded-rag at 80ef892, with the figure-check fix. All 240 records ran in one
+  cloud sandbox, 16 to 19 November.
+- **Why not `r124e`:** it stopped at 19/240 on the laptop. The laptop's and the
+  sandbox's Ollama can return slightly different embeddings, so finishing it in
+  the cloud would have mixed two embedders. It was rerun whole.
+- **Numbers:** workflow 85/120, agent 99/120; on the 40 questions 29 both, 4
+  agent only, 7 neither, McNemar p = 0.125. The agent stopped on the budget
+  message in 8 of 120 runs; one agent record (mh08, repeat 1) is a Groq HTTP
+  400, scored as a failure.
+- **What changed in the story:** the split is the same as `r123e` (0 and 4) but
+  not the questions. mh03 and nu08 now pass for the workflow; its other wrong
+  refusals are retrieval misses (14 of 15, from replaying the recorded
+  searches, which retrieval being deterministic allows). "The refusal is the
+  model's, not the gate's" and "the two systems are level" (`r122e`) were wrong.
+- **Rate-limit reasons:** when every key returns 429, the error keeps Groq's
+  reason per key (`rr/llm.py::_limit_reason`: limit kind, used over limit,
+  tokens requested, organisation prefix, never the key). The message still
+  starts with "rate-limited on every configured key (429)". Added because the
+  daily cap (TPD) refuses a 6,000-token call while a 700-token one still fits.
 
-- **What:** the most passages one search returns is now
-  `settings.MAX_SEARCH_K`, read from `RR_MAX_SEARCH_K` (default 8, the value
-  hard-coded in `rr/tools.py` until now). `SearchArgs.capped_k` reads it at
-  call time. `eval/run_compare.run_settings()` stores `max_search_k` and
-  `workflow_search_k` on every record.
-- **Why:** the agent-vs-workflow comparison is not one variable. In `r125e`
-  209 of the agent's 238 searches asked for k=10 and got 8 passages; the
-  workflow always searches at 4. The agent's lead (99/120 against 85/120) and
-  its 8 runs over the token budget both mix the loop with twice the retrieval
-  depth. A run with `RR_MAX_SEARCH_K=4` gives the agent the workflow's depth
-  and separates the two. Raising `RR_MAX_TOKENS` instead was rejected: the
-  shared budget is what makes the comparison fair.
-- **Numbers:** nothing published changes; the default keeps every past run's
-  behaviour. No run was made. An agent run of 120 records used about 1M Groq
-  tokens in `r125e` (7,674 in + 683 out on average), several days of one
-  organisation's 200K/day cap.
-  Tests: 276 -> 277 (`tests/test_tools.py::test_search_cap_follows_settings_for_the_k4_ablation`,
-  checked failing without the change).
-- **Revisit if:** the k=4 run shows the agent's lead holds (then the loop
-  explains it) or disappears (then retrieval depth does, and the README must
-  say so).
+## 2026-11-22: `r126e` control run: the move from `r122e` was mostly chance
+
+- **What:** `r126e` is `r125e`'s route-or-roam code on grounded-rag e9535b2,
+  the commit `r122e` used (`rag/answer.py` and `rag/verify.py` are identical at
+  both, only retrieval differs, 43cde89). 240/240 records, same cloud machine,
+  sha256 of the records file equal on both sides.
+- **Numbers:** workflow 88/120 (31, 30, 27 per repeat), 30/40 on the majority
+  (Wilson 60-86%); agent 95/120 (33, 32, 30), 32/40 (65-90%). Only the workflow
+  1 (nu01), only the agent 3 (sh09, mh02, cc06), both 29, neither 7; McNemar
+  p = 0.625. False refusals: 15 for the workflow, 5 for the agent. The agent
+  stopped on the budget message in 12 of 120 runs and 28 runs ended above 12,000
+  tokens (23 in `r125e`).
+- **Conclusion:** `r122e` and `r125e` differ at the majority on 8 question ×
+  system pairs. `r126e` sides with `r125e` on 6 and with `r122e` on 2 (workflow
+  mh07, agent nu01). So chance explains most of the move, and 2 pairs can't size
+  a retrieval effect. Reproduce it with `python -m eval.compare_runs
+  runs/r122e--groq-openai-gpt-oss-120b.jsonl runs/r125e--groq-openai-gpt-oss-120b.jsonl
+  runs/r126e--groq-openai-gpt-oss-120b.jsonl` (`r122e` is not in the repository:
+  its file stays in the local `runs/`).
+- **README claims corrected:** cross-corpus questions are 6 of the agent's 14
+  extra passes in `r125e` and 2 of 7 in `r126e`, so "most of the gap" was wrong;
+  the agent answers sh10 (unanswerable) once in `r126e` (8/9); 0/6 questions are
+  4 in `r125e` and 7 in `r126e` (cc03, cc05, in03 added); with the old retrieval
+  the workflow still refuses 15 answerable questions, on another set, 12 of
+  them missing a gold source the answer needed (replayed on 23 November, see
+  below); the budget message ended 8 agent runs (12 in `r126e`).
+
+## 2026-11-22: Docs cut down, runs made traceable
+
+- **What:** the README keeps what the project is, results, limits and commands;
+  CI, Docker, Render and Streamlit moved to `docs/deploy.md`; old runs
+  (`r120e` to `r124e`, `s120*`) are summarised in the deep dive. The records and
+  reports of `r125e` and `r126e` are un-ignored in `.gitignore`, so the
+  README's figures can be recomputed from the repository.
+- **Why:** short docs and one decision log. A figure nobody can recompute is a
+  claim, not a result.
+- **Tests:** 287 to 291: the agent's call to `check_answer` (question and tool
+  calls) is pinned, and so is the private `rag.verify._numbers` that
+  `rr/grounded.py` imports; `eval/compare_runs.py` has two offline tests.
+
+## 2026-11-23: grounded-rag pin moves to 3b09461
+
+- **What:** the Dockerfile and CI pin grounded-rag at 3b09461 (its `main` after
+  the 22 November audit), up from 2fad55f. Published runs keep their commit:
+  `r125e` on 80ef892, `r126e` on e9535b2. New runs use 3b09461.
+- **Why:** the pin had fallen behind grounded-rag's fixes. Retrieval is the same
+  as 80ef892 and the system prompt is unchanged; the verifier now reads "n't"
+  negations and thousands separators correctly, which can change which figures
+  `check_answer` flags. route-or-roam passes its own grounding bar, so
+  grounded-rag's new default (0.30) does not apply.
+- **Replay of the workflow's false refusals,** same index, recorded queries:
+  `r126e` on e9535b2, 12 of 15 miss a gold source the answer needed (only sh08
+  got none at all); `r125e` on 80ef892, 14 of 15. No LLM call.
+
+## 2026-11-23: Search depth cap made configurable, for a k=4 agent ablation
+
+- **What:** the most passages one search returns is `RR_MAX_SEARCH_K`
+  (`settings.MAX_SEARCH_K`, default 8, the old hard-coded value). Run records
+  store `max_search_k` and `workflow_search_k`.
+- **Why:** in `r125e`, 209 of the agent's 238 searches asked for k=10 and got 8;
+  the workflow always searches at 4. So the agent's lead mixes the loop with
+  twice the depth. `RR_MAX_SEARCH_K=4` separates them. Raising `RR_MAX_TOKENS`
+  instead would break the shared budget.
+- **State:** nothing published changes. The ablation is not run yet (about 1M
+  Groq tokens for 120 agent records). If the lead holds, the loop explains it;
+  if it vanishes, retrieval depth does and the README must say so.

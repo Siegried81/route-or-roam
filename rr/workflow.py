@@ -12,7 +12,6 @@ searches return.
 
 from __future__ import annotations
 
-import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
@@ -145,7 +144,7 @@ def build_workflow(llm):
             fetched = list(pool.map(prefetch_search, calls))
         upd: dict = {}
         cur = dict(state)
-        for args, hits in zip(calls, fetched):
+        for args, hits in zip(calls, fetched, strict=True):
             res = run_tool("search_documents", args, cur["passages"],
                            injected_passage=state.get("injected_passage"), prefetched=hits)
             upd = record_tool(cur, "search_documents", args, res)
@@ -202,7 +201,8 @@ def build_workflow(llm):
 
     def verify(state: RunState) -> dict:
         """grounded-rag's verifier; a failure earns exactly one retry of the answer step."""
-        upd = check_answer(state["answer"], state["passages"])
+        upd = check_answer(state["answer"], state["passages"], question=state["question"],
+                           tool_calls=state["tool_calls"])
         upd["retry_used"] = state.get("answer_attempts", 0) > 1
         return upd
 

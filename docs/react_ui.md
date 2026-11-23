@@ -26,14 +26,10 @@ imports this project's `api` before that happens, so the right package is used.
 
 ## Production (one process)
 
-```bash
-cd web && npm install && npm run build && cd ..
-.venv/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8001
-# open http://127.0.0.1:8001 : FastAPI serves web/dist when it exists
-```
-
-`web/dist` is not committed: until `npm run build` has run, `/` is a 404 and only
-the `/api/*` routes answer.
+`cd web && npm run build`, then start uvicorn as above: FastAPI serves
+`web/dist` when it exists (`/` is a 404 until the build has run; `/api/*`
+answers regardless). The Docker image does this; see
+[deploy.md](deploy.md).
 
 ## Endpoints
 

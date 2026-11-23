@@ -37,6 +37,7 @@ import config as gr_config  # noqa: E402  (grounded-rag's config module)
 from rag import answer as gr_answer  # noqa: E402
 from rag.types import Chunk, Retrieved  # noqa: E402
 from rag.verify import VerificationReport, verify_answer  # noqa: E402
+from rag.verify import _numbers as _gr_figures  # noqa: E402
 
 # Re-exported so the rest of rr never copies grounded-rag's prompt text.
 SYSTEM_PROMPT = gr_answer.SYSTEM_PROMPT
@@ -48,7 +49,7 @@ VERIFY_MIN_GROUNDING = gr_config.VERIFY_MIN_GROUNDING
 __all__ = [
     "Chunk", "Retrieved", "VerificationReport", "SYSTEM_PROMPT", "REFUSAL_MESSAGE",
     "REFUSAL_MESSAGE_SET",
-    "VERIFY_MIN_GROUNDING", "search_corpus", "list_corpus_sections", "verify",
+    "VERIFY_MIN_GROUNDING", "search_corpus", "list_corpus_sections", "verify", "figures_in",
 ]
 
 
@@ -98,3 +99,13 @@ def list_corpus_sections(corpus: str) -> list[str]:
 def verify(answer_text: str, sources: list[Retrieved]) -> VerificationReport:
     """grounded-rag's offline citation + grounding check, at grounded-rag's threshold."""
     return verify_answer(answer_text, sources, min_grounding=VERIFY_MIN_GROUNDING)
+
+
+def figures_in(text: str) -> set[str]:
+    """Every spelling of every figure in `text`, normalised as the verifier's figure check does.
+
+    Taken from grounded-rag rather than re-implemented, so a figure found here
+    compares equal to the strings its report lists as unsupported (separators
+    removed, decimal comma to point, "25 billion" also as "25000000000").
+    """
+    return _gr_figures(text)
