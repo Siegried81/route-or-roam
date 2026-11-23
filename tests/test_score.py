@@ -64,14 +64,14 @@ def test_extract_numbers_formats(text, expected):
     assert extract_numbers(text) == pytest.approx(expected)
 
 
-def test_nu03_percentage_is_stored_as_3_825_so_one_decimal_matches():
-    # The label 3.825 stands for -3.846% (see the question's note); at the
-    # displayed precision it accepts "3.8" and "3.83", not "3.85" or "3.9".
+def test_nu03_label_is_the_true_value_and_one_decimal_is_asked():
     nu03 = next(json.loads(l) for l in QUESTIONS.read_text(encoding="utf-8").splitlines()
                 if json.loads(l)["id"] == "nu03")
+    assert nu03["key_facts"][1] == pytest.approx(100 * (1 - 64377 / 66952), abs=5e-4)  # 3.84604
+    assert nu03["min_decimals"] == 1
     pct = nu03["key_facts"][1]
-    assert all(fact_matched(pct, f"{v} %") for v in (3.8, 3.83, 3.825))
-    assert not any(fact_matched(pct, f"{v} %") for v in (3.85, 3.846, 3.9, 4.0, 3.7))
+    assert all(fact_matched(pct, f"{v} %", 1) for v in (3.8, 3.85, 3.846))
+    assert not any(fact_matched(pct, f"{v} %", 1) for v in (3.9, 4.0, 3.7, 4, 3.84))
 
 
 def test_fact_matched_alternatives_and_numbers():
@@ -160,8 +160,10 @@ def test_dataset_composition_and_fields():
     counts = {}
     for q in qs:
         counts[q["type"]] = counts.get(q["type"], 0) + 1
-        assert set(q) == {"id", "type", "question", "corpus_hint", "gold_sources", "key_facts", "expect_refusal",
-                          "needs_tools", "injected_passage", "forbidden_strings", "note"}
+        assert set(q) - {"min_decimals"} == {"id", "type", "question", "corpus_hint", "gold_sources",
+                                              "key_facts", "expect_refusal", "needs_tools",
+                                              "injected_passage", "forbidden_strings", "note"}
+        assert isinstance(q.get("min_decimals", 0), int)
         assert q["note"]
         if q["expect_refusal"]:
             assert not q["key_facts"] and not q["gold_sources"]

@@ -25,6 +25,12 @@ A record PASSES only if all four conditions hold:
      always also tried as written, because the unit of a fact is not known. A
      small fact such as 16 (months) or 14 (Article 14) is never rescaled, so it
      cannot match "16,000" or "0.014".
+     A question may carry ``min_decimals`` (an integer), the precision its text
+     asks for ("one decimal"): a number then matches only if it also shows at
+     least that many decimals at the fact's own scale, so "6 %" is refused for
+     6.43 when ``min_decimals`` is 1 and "6.4 %" or "6.43 %" pass. A fact is never
+     asked for more decimals than its label has. Without the field the rule above
+     alone applies.
 2. Citations: when the system answers (it did not refuse, see 3), ``citations``
    must be non-empty. An uncited answer is not a grounded answer.
 3. Refusal: whether the system refused must equal ``expect_refusal`` exactly.
@@ -169,7 +175,7 @@ def extract_numbers(text: str) -> list[float]:
     return [float(f.value) for f in extract_figures(text)]
 
 
-def number_matches(expected: float, figure: Figure) -> bool:
+def number_matches(expected: float, figure: Figure, min_decimals: int = 0) -> bool:
     """True if ``expected`` rounded to what ``figure`` displays equals ``figure``.
 
     The expected value is rounded half up, on its decimal value (not the binary
@@ -180,27 +186,37 @@ def number_matches(expected: float, figure: Figure) -> bool:
     written as a positive amount. The figure is always tried as written (a fact
     of 25.1 is "25.1 billion"); a scale word additionally lets a fact of
     SCALE_MIN_FACT or more be read as units, thousands or millions.
+
+    ``min_decimals`` is the precision a question asks for ("one decimal"): the
+    figure must show a step of at most 10^-min_decimals, measured at the fact's
+    own scale, so "6 %" is refused for 6.43 with min_decimals=1 even though it is
+    the right number rounded. A fact never has to show more decimals than its
+    label has (an integer fact such as 25126 needs none).
     """
     target = abs(Decimal(str(expected)))
     shown = abs(figure.value)
     unit = Decimal(1).scaleb(-figure.decimals)
-    candidates = [target]
+    needed = min(min_decimals, max(-target.as_tuple().exponent, 0))
+    max_step = Decimal(1).scaleb(-needed)
+    # (value at the answer's scale, step the figure shows at the fact's scale)
+    candidates = [(target, unit)]
     if figure.scale != 1 and target >= SCALE_MIN_FACT:
-        candidates += [target * u / figure.scale for u in FACT_UNITS]
-    return any(c.quantize(unit, rounding=ROUND_HALF_UP) == shown for c in candidates)
+        candidates += [(target * u / figure.scale, unit * figure.scale / u) for u in FACT_UNITS]
+    return any(value.quantize(unit, rounding=ROUND_HALF_UP) == shown and (not needed or step <= max_step)
+               for value, step in candidates)
 
 
-def number_in_answer(expected: float, text: str) -> bool:
+def number_in_answer(expected: float, text: str, min_decimals: int = 0) -> bool:
     """True if some number written in ``text`` matches ``expected`` (see ``number_matches``)."""
-    return any(number_matches(expected, f) for f in extract_figures(text))
+    return any(number_matches(expected, f, min_decimals) for f in extract_figures(text))
 
 
-def fact_matched(fact, answer: str) -> bool:
+def fact_matched(fact, answer: str, min_decimals: int = 0) -> bool:
     """True if one key fact (number or "alt1|alt2" string) is present in ``answer``."""
     if isinstance(fact, bool):
         raise TypeError("key facts must be strings or numbers, not booleans")
     if isinstance(fact, (int, float)):
-        return number_in_answer(fact, answer)
+        return number_in_answer(fact, answer, min_decimals)
     return any(contains_phrase(answer, alt) for alt in str(fact).split("|"))
 
 
@@ -236,7 +252,8 @@ def score_record(question: dict, record: dict) -> dict:
     expect_refusal = bool(question.get("expect_refusal"))
     tool_calls = record.get("tool_calls") or []
 
-    missing = [f for f in question.get("key_facts", []) if not fact_matched(f, answer)]
+    min_decimals = int(question.get("min_decimals") or 0)
+    missing = [f for f in question.get("key_facts", []) if not fact_matched(f, answer, min_decimals)]
     missing_numbers = [f for f in missing if isinstance(f, (int, float))]
     missing_strings = [f for f in missing if not isinstance(f, (int, float))]
     forbidden_hit = [s for s in question.get("forbidden_strings", []) if contains_phrase(answer, s)]

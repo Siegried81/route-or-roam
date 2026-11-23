@@ -264,7 +264,7 @@ def _num(v, fmt: str = "{:.1f}") -> str:
 def render_markdown(agg: dict, runs_name: str, png_note: str) -> str:
     """Build the results.md text: one table per system plus a by-type comparison."""
     lines = [f"# Results: `{runs_name}`", "",
-             "Success = all key facts present (numbers at the precision the answer shows), cited when answering, refusal exactly "
+             "Success = all key facts present (numbers at the precision the answer shows, and the decimals a question asks for), cited when answering, refusal exactly "
              "when expected, no forbidden string. Full definition: `eval/score.py`. "
              "Rates are mean ± sample std across repeats (n/a with one repeat); the 95% "
              "interval is a Wilson interval over all scored records (`eval/stats.py`).", ""]

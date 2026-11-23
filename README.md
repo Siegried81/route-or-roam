@@ -6,7 +6,7 @@
 
 On 40 grounded questions (Apple's FY2025 10-K and the EU AI Act), the agent
 passes more than the workflow in both runs, 99 against 85 records of 120 and
-then 97 against 88. The gap is not statistically significant, and a bad search
+then 95 against 88. The gap is not statistically significant, and a bad search
 caps both systems. The agent uses about 1.5 times the tokens per correct answer
 but the same dollars (about $0.002), and its slowest runs are slower: p95
 latency 25 to 29 s against 9 to 13 s.
@@ -37,7 +37,7 @@ tokens and $0.60 per million output, read on
 | `r125e` | workflow | 85/120 | 3585 + 1355 | 6,974 | $0.0019 |
 | `r125e` | agent | 99/120 | 7674 + 683 | 10,130 | $0.0019 |
 | `r126e` | workflow | 88/120 | 3436 + 1287 | 6,440 | $0.0018 |
-| `r126e` | agent | 97/120 | 7528 + 691 | 10,169 | $0.0019 |
+| `r126e` | agent | 95/120 | 7528 + 691 | 10,383 | $0.0020 |
 
 ## Where it stands
 
@@ -47,13 +47,13 @@ on e9535b2 ([report](runs/r126e.md)), each on one cloud machine.
 
 | | workflow `r125e` | agent `r125e` | workflow `r126e` | agent `r126e` |
 |---|---|---|---|---|
-| passed, records | 85/120 (70.8%) | 99/120 (82.5%) | 88/120 (73.3%) | 97/120 (80.8%) |
-| passed in 2 of 3 repeats | 29/40 | 33/40 | 30/40 | 33/40 |
+| passed, records | 85/120 (70.8%) | 99/120 (82.5%) | 88/120 (73.3%) | 95/120 (79.2%) |
+| passed in 2 of 3 repeats | 29/40 | 33/40 | 30/40 | 32/40 |
 | latency p50 / p95 (s) | 4.7 / 9.2 | 5.1 / 28.7 | 3.9 / 13.5 | 4.6 / 25.4 |
 
 The difference is not significant. Paired on the 40 questions, exact McNemar:
 `r125e` p = 0.125 (4 questions only the agent passed, none the other way, the
-smallest p that 4 discordant pairs can give), `r126e` p = 0.25 (3 questions only the agent passed, none the other way). The runs need
+smallest p that 4 discordant pairs can give), `r126e` p = 0.625. The runs need
 more questions. The ablation that caps the agent's search at k=4, like the
 workflow's (`RR_MAX_SEARCH_K=4`), is not run yet (about 1 million Groq tokens),
 so part of the gap may be search depth, not autonomy. More in
@@ -88,7 +88,7 @@ python -m uvicorn api.main:app --port 8001      # React UI backend
 cd web && npm install && npm run dev            # http://localhost:5181
 python -m streamlit run app.py                  # Streamlit alternative, port 8501
 
-python -m pytest -q                             # 359 tests, offline
+python -m pytest -q                             # 307 tests, offline
 ```
 
 An eval run, its resume, its check and its report: [docs/running_an_eval.md](docs/running_an_eval.md).
