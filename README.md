@@ -102,6 +102,8 @@ agent writes a file, a fence around retrieved text, a budget of 8 calls and 12,0
 tokens per run, a loop guard, cite-or-refuse with verification, and key rotation
 against free-tier limits. Each is described in the
 [deep dive](docs/technical_deep_dive.md).
+Long runs and unattended coding agents work in a Docker sandbox, under the rules
+in [docs/agent_sandboxing.md](docs/agent_sandboxing.md).
 
 ## Limits
 

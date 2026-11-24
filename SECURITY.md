@@ -32,3 +32,5 @@ way, and it will be revoked rather than merely deleted.
 - In scope: an approval without the token, an agent run that escapes its step
   or token budget, a tool call outside the declared schema, and prompt
   injection through retrieved documents.
+- Long evaluation runs and unattended coding agents run in a Docker sandbox;
+  the rules they follow are in [docs/agent_sandboxing.md](docs/agent_sandboxing.md).
